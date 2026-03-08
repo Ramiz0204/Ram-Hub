@@ -7,14 +7,14 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
 
--- Enhanced Spectate Library (from previous)
+-- Enhanced Spectate Library
 local SpectateLib = {}
 local selectedPlayer = nil
 local isSpectating = false
 local autoSpectateEnabled = false
 
--- Spectate functions (same as before)
 function SpectateLib.setLocalCamera()
     spawn(function()
         local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -56,14 +56,10 @@ function SpectateLib.getPlayerList()
     return players
 end
 
-function SpectateLib.getStatus() return {isSpectating = isSpectating, selectedPlayer = selectedPlayer, autoSpectateEnabled = autoSpectateEnabled} end
-
 -- ESP System
 local ESPConnections = {}
-local ESPEnabled = false
 function createESP(player)
     if player == LocalPlayer or not player.Character then return end
-    
     local highlight = Instance.new("Highlight")
     highlight.FillColor = Color3.fromRGB(255, 0, 0)
     highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
@@ -96,19 +92,20 @@ function createESP(player)
     distanceLabel.Font = Enum.Font.Gotham
     distanceLabel.Parent = billboard
     
-    ESPConnections[player] = {highlight = highlight, billboard = billboard, nameLabel = nameLabel, distanceLabel = distanceLabel}
+    ESPConnections[player] = {highlight = highlight, billboard = billboard}
 end
 
 function toggleESP(enabled)
-    ESPEnabled = enabled
+    local ESPEnabled = enabled
     if enabled then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then createESP(player) end
         end
-        RunService.Heartbeat:Connect(function()
-            if not ESPEnabled then return end
+        local heartbeatConn
+        heartbeatConn = RunService.Heartbeat:Connect(function()
+            if not ESPEnabled then heartbeatConn:Disconnect() return end
             for player, esp in pairs(ESPConnections) do
-                if player.Character and player.Character.Parent then
+                if player.Character and player.Character.Parent and player.Character:FindFirstChild("Head") then
                     local distance = (LocalPlayer.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
                     esp.distanceLabel.Text = math.floor(distance) .. "m"
                 end
@@ -128,11 +125,11 @@ local flying = false
 local flyConnection
 local noclipping = false
 local noclipConnection
-local speedConnection
+local MovementSpeed = 16
 
 function toggleFly(enabled)
     flying = enabled
-    if enabled and LocalPlayer.Character then
+    if enabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         local bodyVelocity = Instance.new("BodyVelocity")
         bodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000)
         bodyVelocity.Velocity = Vector3.new(0, 0, 0)
@@ -144,13 +141,13 @@ function toggleFly(enabled)
                 return
             end
             local cam = Workspace.CurrentCamera.CFrame
-            local speed = (MovementSpeed or 50)
+            local speed = MovementSpeed
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then bodyVelocity.Velocity = cam.LookVector * speed end
             if UserInputService:IsKeyDown(Enum.KeyCode.S) then bodyVelocity.Velocity = -cam.LookVector * speed end
             if UserInputService:IsKeyDown(Enum.KeyCode.A) then bodyVelocity.Velocity = -cam.RightVector * speed end
             if UserInputService:IsKeyDown(Enum.KeyCode.D) then bodyVelocity.Velocity = cam.RightVector * speed end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then bodyVelocity.Velocity = Vector3.new(0, speed, 0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then bodyVelocity.Velocity = Vector3.new(0, -speed, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then bodyVelocity.Velocity = Vector3.new(bodyVelocity.Velocity.X, speed, bodyVelocity.Velocity.Z) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then bodyVelocity.Velocity = Vector3.new(bodyVelocity.Velocity.X, -speed, bodyVelocity.Velocity.Z) end
         end)
     else
         if flyConnection then flyConnection:Disconnect() end
@@ -171,22 +168,56 @@ function toggleNoclip(enabled)
     end
 end
 
+-- Teleport Function
+function teleportToCFrame(cframe)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = cframe
+    end
+end
+
+-- Chest CFrame
+local ChestCFrame = CFrame.new(928.307007, 39.5789986, -0.0659999996, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+
+-- Infinite Money System
+local infMoneyConnection
+local moneyMultiplier = 1
+
+function toggleInfiniteMoney(enabled)
+    if infMoneyConnection then infMoneyConnection:Disconnect() end
+    
+    if enabled then
+        local targetPlayer = Players:FindFirstChild("Ramiz_0204")
+        if not targetPlayer then
+            Rayfield:Notify({Title = "Error", Content = "Ramiz_0204 not found!", Duration = 4, Image = 4483362461})
+            return
+        end
+        
+        infMoneyConnection = RunService.Heartbeat:Connect(function()
+            moneyMultiplier = moneyMultiplier + 0.5 -- Escalating multiplier
+            local args = {targetPlayer}
+            pcall(function()
+                ReplicatedStorage:WaitForChild("PianoMoney"):FireServer(unpack(args))
+            end)
+        end)
+        Rayfield:Notify({Title = "💰 Infinite Money", Content = "Started loop (escalating amounts)", Duration = 3})
+    end
+end
+
 -- Rayfield UI
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
-    Name = "🎮 Ultimate Hub v3.0",
-    LoadingTitle = "Loading Features...",
-    LoadingSubtitle = "by ZCP0",
-    ConfigurationSaving = {Enabled = true, FileName = "UltimateHub"},
+    Name = "🎮 Ultimate Hub v5.0 💰",
+    LoadingTitle = "Loading 8 Tabs + Inf Money...",
+    LoadingSubtitle = "by ZCP0 - 2026 Edition",
+    ConfigurationSaving = {Enabled = true, FileName = "UltimateHubV5"},
     KeySystem = false
 })
 
 -- 🎮 SPECTATE TAB
 local SpectateTab = Window:CreateTab("Spectate", 4483362458)
-local PlayerSection = SpectateTab:CreateSection("Player Selection")
-
+SpectateTab:CreateSection("Player Selection")
 local AutoSpectateToggle = SpectateTab:CreateToggle({
-    Name = "🔥 Auto Spectate on Select", CurrentValue = false, Flag = "AutoSpectate",
+    Name = "🔥 Auto Spectate", CurrentValue = false, Flag = "AutoSpectate",
     Callback = function(Value) autoSpectateEnabled = Value end
 })
 
@@ -202,7 +233,7 @@ local PlayerDropdown = SpectateTab:CreateDropdown({
     end
 })
 
-local SpectateToggle = SpectateTab:CreateToggle({
+SpectateTab:CreateToggle({
     Name = "🎯 Manual Spectate", CurrentValue = false, Flag = "SpectateToggle",
     Callback = function(Value)
         if Value and selectedPlayer then SpectateLib.startSpectate(selectedPlayer)
@@ -210,46 +241,44 @@ local SpectateToggle = SpectateTab:CreateToggle({
     end
 })
 
-SpectateTab:CreateButton({Name = "⏹️ Emergency Stop", Callback = function() SpectateLib.stopSpectate() SpectateToggle:Set(false) end})
+SpectateTab:CreateButton({Name = "⏹️ Emergency Stop", Callback = function() 
+    SpectateLib.stopSpectate() 
+    AutoSpectateToggle:Set(false) 
+end})
 
 -- 👁️ ESP TAB
 local ESPTab = Window:CreateTab("ESP", 4483362458)
 ESPTab:CreateToggle({
-    Name = "Player ESP", CurrentValue = false, Flag = "ESP",
+    Name = "👥 Player ESP + Distance", CurrentValue = false, Flag = "ESP",
     Callback = function(Value) toggleESP(Value) end
 })
 
 -- 🌍 WORLD TAB
 local WorldTab = Window:CreateTab("World", 4483362458)
-
 local FullbrightToggle = WorldTab:CreateToggle({
-    Name = "Fullbright", CurrentValue = false, Flag = "Fullbright",
+    Name = "☀️ Fullbright", CurrentValue = false, Flag = "Fullbright",
     Callback = function(Value)
         if Value then
             Lighting.Brightness = 2
             Lighting.ClockTime = 14
-            Lighting.FogEnd = 100000
+            Lighting.FogEnd = 9e9
             Lighting.GlobalShadows = false
             Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
         else
             Lighting.Brightness = 1
-            Lighting.ClockTime = 14
             Lighting.FogEnd = 100000
             Lighting.GlobalShadows = true
-            Lighting.OutdoorAmbient = Color3.fromRGB(50, 50, 50)
         end
     end
 })
 
 WorldTab:CreateToggle({
-    Name = "Remove Fog", CurrentValue = false, Flag = "NoFog",
+    Name = "🌫️ Remove Fog", CurrentValue = false, Flag = "NoFog",
     Callback = function(Value) Lighting.FogEnd = Value and 9e9 or 100000 end
 })
 
 -- 🏃 MOVEMENT TAB
 local MovementTab = Window:CreateTab("Movement", 4483362458)
-local MovementSpeed = 16
-
 MovementTab:CreateSlider({
     Name = "Walk Speed", Range = {16, 500}, Increment = 1, Suffix = "Speed",
     CurrentValue = 16, Flag = "WalkSpeed",
@@ -262,67 +291,138 @@ MovementTab:CreateSlider({
 })
 
 local FlyToggle = MovementTab:CreateToggle({
-    Name = "Fly (WASD + Space/Shift)", CurrentValue = false, Flag = "Fly",
+    Name = "✈️ Fly (WASD + Space/Shift)", CurrentValue = false, Flag = "Fly",
     Callback = function(Value) toggleFly(Value) end
 })
 
 local NoclipToggle = MovementTab:CreateToggle({
-    Name = "Noclip", CurrentValue = false, Flag = "Noclip",
+    Name = "👻 Noclip", CurrentValue = false, Flag = "Noclip",
     Callback = function(Value) toggleNoclip(Value) end
+})
+
+-- 🚀 TELEPORT TAB
+local TeleportTab = Window:CreateTab("Teleports", 4483362458)
+TeleportTab:CreateSection("Quick Teleports")
+
+TeleportTab:CreateButton({
+    Name = "📦 TP to Chest", 
+    Callback = function()
+        teleportToCFrame(ChestCFrame)
+        Rayfield:Notify({Title = "Teleported!", Content = "Moved to chest", Duration = 2})
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "🏠 TP to Spawn", 
+    Callback = function()
+        if Workspace:FindFirstChild("SpawnLocation") then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = Workspace.SpawnLocation.CFrame + Vector3.new(0, 5, 0)
+        else
+            LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
+        end
+        Rayfield:Notify({Title = "Spawn TP", Content = "Teleported to spawn", Duration = 2})
+    end
+})
+
+local TPPlayerDropdown = TeleportTab:CreateDropdown({
+    Name = "TP to Player", Options = SpectateLib.getPlayerList(), CurrentOption = {"None"},
+    Callback = function(Option)
+        local target = Players:FindFirstChild(Option[1])
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 5, 0)
+            Rayfield:Notify({Title = "Player TP", Content = "Teleported to " .. Option[1], Duration = 2})
+        end
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "🔄 Server Hop", 
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/serverhop.lua"))()
+    end
+})
+
+-- 💰 MONEY FARM TAB (NEW!)
+local MoneyTab = Window:CreateTab("💰 Money", 4483362458)
+MoneyTab:CreateSection("Infinite Money")
+
+local InfMoneyToggle = MoneyTab:CreateToggle({
+    Name = "💎 Infinite Money (Loop)", CurrentValue = false, Flag = "InfMoney",
+    Callback = function(Value)
+        toggleInfiniteMoney(Value)
+    end
+})
+
+MoneyTab:CreateButton({
+    Name = "🔄 Test Single Fire", 
+    Callback = function()
+        local targetPlayer = Players:FindFirstChild("Ramiz_0204")
+        if targetPlayer then
+            local args = {targetPlayer}
+            pcall(function()
+                ReplicatedStorage:WaitForChild("PianoMoney"):FireServer(unpack(args))
+            end)
+            Rayfield:Notify({Title = "Test Fired", Content = "Single money request sent", Duration = 2})
+        else
+            Rayfield:Notify({Title = "Error", Content = "Ramiz_0204 not found!", Duration = 3, Image = 4483362461})
+        end
+    end
+})
+
+-- 🎨 GRAPHICS TAB
+local GraphicsTab = Window:CreateTab("Graphics", 4483362458)
+GraphicsTab:CreateSlider({
+    Name = "Field of View", Range = {70, 120}, Increment = 1, Suffix = "°",
+    CurrentValue = 70, Flag = "FOV",
+    Callback = function(Value) Camera.FieldOfView = Value end
+})
+
+GraphicsTab:CreateToggle({
+    Name = "Third Person", CurrentValue = false, Flag = "ThirdPerson",
+    Callback = function(Value)
+        Camera.CameraType = Value and Enum.CameraType.Custom or Enum.CameraType.Custom
+    end
 })
 
 -- 📊 INFO TAB
 local InfoTab = Window:CreateTab("Info", 4483362458)
-
 local FPSLabel = InfoTab:CreateLabel("FPS: 0")
 local PingLabel = InfoTab:CreateLabel("Ping: 0ms")
 local PlayerCount = InfoTab:CreateLabel("Players: 0")
 
 spawn(function()
     local lastTime = tick()
-    while wait() do
+    while wait(0.1) do
         local fps = math.floor(1/(tick() - lastTime))
         FPSLabel:Set("FPS: " .. fps)
-        PingLabel:Set("Ping: " .. game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString())
+        PingLabel:Set("Ping: " .. math.floor(LocalPlayer:GetNetworkPing() * 1000) .. "ms")
         PlayerCount:Set("Players: " .. #Players:GetPlayers())
         lastTime = tick()
     end
 end)
 
--- RENDER TAB
-local RenderTab = Window:CreateTab("Render", 4483362458)
-
-local FOVSlider = RenderTab:CreateSlider({
-    Name = "Field of View", Range = {70, 120}, Increment = 1, Suffix = "°",
-    CurrentValue = 70, Flag = "FOV",
-    Callback = function(Value) Camera.FieldOfView = Value end
-})
-
-RenderTab:CreateToggle({
-    Name = "Third Person", CurrentValue = false, Flag = "ThirdPerson",
-    Callback = function(Value)
-        if Value then
-            Camera.CameraType = Enum.CameraType.Custom
-            Camera.CameraSubject = LocalPlayer.Character.Humanoid
-            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        end
-    end
-})
-
--- Auto character updates
+-- Auto updates
 LocalPlayer.CharacterAdded:Connect(function()
     wait(1)
-    if MovementSpeed then
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         LocalPlayer.Character.Humanoid.WalkSpeed = MovementSpeed
     end
 end)
 
+Players.PlayerAdded:Connect(function() 
+    wait(0.5) 
+    PlayerDropdown:Refresh(SpectateLib.getPlayerList())
+    TPPlayerDropdown:Refresh(SpectateLib.getPlayerList())
+end)
+
 -- Initial setup
 PlayerDropdown:Refresh(SpectateLib.getPlayerList())
+TPPlayerDropdown:Refresh(SpectateLib.getPlayerList())
 Rayfield:Notify({
-    Title = "Ultimate Hub v3.0 Loaded!",
-    Content = "5 tabs ready: Spectate, ESP, World, Movement, Info & Render!",
-    Duration = 6
+    Title = "🎮 Ultimate Hub v5.0 💰 LOADED!",
+    Content = "9 tabs: Spectate•ESP•World•Movement•Teleports•Money•Graphics•Info + INF MONEY LOOP!",
+    Duration = 8,
+    Image = 4483362458
 })
 
 Rayfield:LoadConfiguration()
