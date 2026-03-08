@@ -1,104 +1,283 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local Camera = Workspace.Camera
+local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
--- Load OrionLib
-local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+-- Enhanced Spectate Library
+local SpectateLib = {}
+local selectedPlayer = nil
+local isSpectating = false
+local autoSpectateEnabled = false
 
--- Create the main window
-local Window = OrionLib:MakeWindow({
-    Name = "Jailbreak | OrionLib",
-    HidePremium = false,
-    SaveConfig = true,
-    ConfigFolder = "JBConfig"
-})
-
--- Create a tab
-local Tab = Window:MakeTab({
-    Name = "Player Controls",
-    PremiumOnly = false
-})
-
--- Add a section for player controls
-local Section = Tab:AddSection({
-    Name = "Player List Management"
-})
-
--- Placeholder for player list
-local playerNames = {}
-local selectedPlayer = nil -- To keep track of the selected player
-
--- Create the dropdown for player selection
-local PlayerDropdown
-PlayerDropdown = Tab:AddDropdown({
-    Name = "Player List",
-    Default = "Select a Player",
-    Options = {"Loading..."},
-    Callback = function(Value)
-        selectedPlayer = Value
-        print("Selected player:", selectedPlayer)
-    end
-})
-
--- Function to refresh the player list
-local function refreshPlayerList()
-    playerNames = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        table.insert(playerNames, player.Name)
-    end
-
-    -- If no players are found, provide a fallback
-    if #playerNames == 0 then
-        playerNames = {"No Players Found"}
-    end
-
-    -- Update the dropdown with the refreshed player list
-    PlayerDropdown:Refresh(playerNames, playerNames[1])
+-- Safe camera reset to local player
+function SpectateLib.setLocalCamera()
+    spawn(function()
+        local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local hum = char:WaitForChild("Humanoid", 5)
+        if hum then
+            Camera.CameraSubject = hum
+        end
+    end)
 end
 
--- Add a button to refresh the player list
-Tab:AddButton({
-    Name = "Refresh Player List",
-    Callback = function()
-        refreshPlayerList()
-        print("Player list refreshed!")
-    end    
-})
+-- Start spectating a player by name
+function SpectateLib.startSpectate(playerName)
+    if playerName == LocalPlayer.Name then 
+        return false, "Cannot spectate yourself"
+    end
+    
+    local targetPlayer = Players:FindFirstChild(playerName)
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChildOfClass("Humanoid") then
+        Camera.CameraSubject = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+        selectedPlayer = playerName
+        isSpectating = true
+        return true, "Spectating " .. playerName
+    end
+    return false, "Player not found or invalid"
+end
 
--- Functionality to handle spectating
-local isSpectating = false -- To keep track of the toggle state
+-- Stop spectating
+function SpectateLib.stopSpectate()
+    SpectateLib.setLocalCamera()
+    selectedPlayer = nil
+    isSpectating = false
+    return true, "Stopped spectating"
+end
 
--- Add the spectate toggle checkbox
-local SpectateToggle = Tab:AddToggle({
-    Name = "Spectate Selected Player",
-    Default = false,
-    Callback = function(Value)
-        if Value then
-            -- Start spectating the selected player
-            if selectedPlayer and selectedPlayer ~= LocalPlayer.Name then
-                local targetPlayer = Players:FindFirstChild(selectedPlayer)
-                if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid") then
-                    Camera.CameraSubject = targetPlayer.Character.Humanoid
-                    isSpectating = true
-                    print("Spectating:", selectedPlayer)
-                else
-                    print("Player not found or invalid.")
-                end
-            else
-                print("Please select a valid player to spectate.")
-            end
-        else
-            -- Stop spectating and reset to the local player
-            Camera.CameraSubject = LocalPlayer.Character.Humanoid
-            isSpectating = false
-            print("Stopped spectating.")
+-- Toggle spectate
+function SpectateLib.toggleSpectate(playerName)
+    if isSpectating then
+        return SpectateLib.stopSpectate()
+    elseif playerName then
+        return SpectateLib.startSpectate(playerName)
+    end
+    return false, "No player selected"
+end
+
+-- Get player list (excluding self)
+function SpectateLib.getPlayerList()
+    local players = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(players, player.Name)
         end
     end
+    return players
+end
+
+-- Get current status
+function SpectateLib.getStatus()
+    return {
+        isSpectating = isSpectating,
+        selectedPlayer = selectedPlayer,
+        autoSpectateEnabled = autoSpectateEnabled
+    }
+end
+
+-- Rayfield UI Implementation
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "🎮 Spectate Hub v2.0",
+    LoadingTitle = "Enhanced Spectate",
+    LoadingSubtitle = "by ZCP0",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = nil,
+        FileName = "SpectateHubV2"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "noinvitelink",
+        RememberJoins = true
+    },
+    KeySystem = false
 })
 
--- Populate the initial player list
-refreshPlayerList()
+local MainTab = Window:CreateTab("Spectate", 4483362458)
 
--- Initialize the UI
-OrionLib:Init()
+local PlayerSection = MainTab:CreateSection("Player Selection")
+
+-- Auto-spectate toggle (MUST BE FIRST)
+local AutoSpectateToggle = MainTab:CreateToggle({
+    Name = "🔥 Auto Spectate on Select",
+    CurrentValue = false,
+    Flag = "AutoSpectateToggle",
+    Callback = function(Value)
+        autoSpectateEnabled = Value
+        Rayfield:Notify({
+            Title = "Auto Spectate",
+            Content = Value and "Enabled - will auto spectate on select" or "Disabled",
+            Duration = 3,
+            Image = 4483362458
+        })
+    end,
+})
+
+local PlayerDropdown = MainTab:CreateDropdown({
+    Name = "Select Player",
+    Options = {},
+    CurrentOption = {"None"},
+    MultipleOptions = false,
+    Flag = "SpectatePlayer",
+    Callback = function(Option)
+        selectedPlayer = Option[1]
+        
+        -- Auto spectate if enabled
+        if autoSpectateEnabled and selectedPlayer then
+            local success, message = SpectateLib.startSpectate(selectedPlayer)
+            Rayfield:Notify({
+                Title = success and "Auto Spectating" or "Auto Spectate Failed",
+                Content = message,
+                Duration = 3,
+                Image = success and 4483362458 or 4483362461
+            })
+        else
+            Rayfield:Notify({
+                Title = "Player Selected",
+                Content = "Selected: " .. selectedPlayer .. (autoSpectateEnabled and " (Auto spectate ON)" or ""),
+                Duration = 3,
+                Image = 4483362458
+            })
+        end
+    end,
+})
+
+local ControlsSection = MainTab:CreateSection("Spectate Controls")
+
+local SpectateToggle = MainTab:CreateToggle({
+    Name = "🎯 Manual Spectate Toggle",
+    CurrentValue = false,
+    Flag = "SpectateToggle",
+    Callback = function(Value)
+        -- Only spectate if toggle is enabled AND player selected
+        if Value and selectedPlayer then
+            local success, message = SpectateLib.startSpectate(selectedPlayer)
+            if not success then
+                SpectateToggle:Set(false)
+                Rayfield:Notify({
+                    Title = "Error",
+                    Content = message,
+                    Duration = 4,
+                    Image = 4483362461
+                })
+                return
+            end
+        elseif isSpectating then
+            local success, message = SpectateLib.stopSpectate()
+        end
+        
+        Rayfield:Notify({
+            Title = isSpectating and "Stopped" or "Spectating",
+            Content = isSpectating and "Reset to your camera" or ("Spectating " .. selectedPlayer),
+            Duration = 3,
+            Image = 4483362458
+        })
+    end,
+})
+
+local RefreshButton = MainTab:CreateButton({
+    Name = "🔄 Refresh Player List",
+    Callback = function()
+        local players = SpectateLib.getPlayerList()
+        PlayerDropdown:Refresh(players)
+        Rayfield:Notify({
+            Title = "Refreshed",
+            Content = #players .. " players loaded",
+            Duration = 2,
+            Image = 4483362458
+        })
+    end,
+})
+
+local StopButton = MainTab:CreateButton({
+    Name = "⏹️ Emergency Stop",
+    Callback = function()
+        SpectateLib.stopSpectate()
+        SpectateToggle:Set(false)
+        Rayfield:Notify({
+            Title = "Stopped",
+            Content = "Camera reset to yourself",
+            Duration = 2,
+            Image = 4483362458
+        })
+    end,
+})
+
+-- Status display
+local StatusLabel = MainTab:CreateLabel("Status: Ready")
+
+-- Enhanced event handling
+spawn(function()
+    -- Auto refresh every 3 seconds
+    while wait(3) do
+        local players = SpectateLib.getPlayerList()
+        PlayerDropdown:Refresh(players)
+        
+        -- Update status label
+        local status = SpectateLib.getStatus()
+        local statusText = "Status: "
+        if status.isSpectating then
+            statusText = statusText .. "Spectating " .. status.selectedPlayer
+        elseif status.selectedPlayer then
+            statusText = statusText .. "Selected: " .. status.selectedPlayer
+        else
+            statusText = statusText .. "No player selected"
+        end
+        StatusLabel:Set(statusText .. " | Auto: " .. (autoSpectateEnabled and "ON" or "OFF"))
+    end
+end)
+
+-- Monitor selected player leaving/dying
+spawn(function()
+    while wait(1) do
+        if selectedPlayer and isSpectating then
+            local target = Players:FindFirstChild(selectedPlayer)
+            if not target or not target.Character or not target.Character:FindFirstChildOfClass("Humanoid") then
+                -- Player left or died - reset if toggle is OFF
+                if not SpectateToggle.CurrentValue then
+                    SpectateLib.stopSpectate()
+                    Rayfield:Notify({
+                        Title = "Player Left/Died",
+                        Content = selectedPlayer .. " is no longer available. Reset to self.",
+                        Duration = 4,
+                        Image = 4483362461
+                    })
+                end
+            end
+        end
+    end
+end)
+
+-- Player events
+Players.PlayerAdded:Connect(function()
+    wait(0.5)
+    RefreshButton:Press()
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if player.Name == selectedPlayer then
+        SpectateLib.stopSpectate()
+        SpectateToggle:Set(false)
+        Rayfield:Notify({
+            Title = "Player Left",
+            Content = player.Name .. " left the game. Reset to self.",
+            Duration = 3,
+            Image = 4483362461
+        })
+    end
+    wait(0.5)
+    RefreshButton:Press()
+end)
+
+-- Initial load
+local initialPlayers = SpectateLib.getPlayerList()
+PlayerDropdown:Refresh(initialPlayers)
+Rayfield:Notify({
+    Title = "Spectate Hub v2.0 Loaded!",
+    Content = "Toggle 'Auto Spectate' ON for instant spectating, or use manual toggle",
+    Duration = 6,
+    Image = 4483362458
+})
+
+Rayfield:LoadConfiguration()
