@@ -221,7 +221,7 @@ Tab4:CreateButton({
       
       local rootPart = character:FindFirstChild("HumanoidRootPart")
       if rootPart then
-         rootPart.CFrame = CFrame.new(31.957923889160156, -457.0199890136719, -54.116859436035156)
+         rootPart.CFrame = CFrame.new(-178.5, 554.500488, -13.5, 0, 0, -1, 0, 1, 0, 1, 0, 0)
          Rayfield:Notify({
             Title = "Teleport",
             Content = "Teleported to End!",
