@@ -1,0 +1,247 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Ramiz Menu",
+   LoadingTitle = "Loading Menu",
+   LoadingSubtitle = "by Ramiz0204",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil,
+      FileName = "RamizMenu"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "noinvitelink",
+      RememberJoins = true
+   },
+   KeySystem = false
+})
+
+-- Tab 1: Get Items
+local Tab1 = Window:CreateTab("Get Items", 4483362458)
+local Section1 = Tab1:CreateSection("Tools")
+
+Tab1:CreateButton({
+   Name = 'RedHyper Gear (Fixed)',
+   Callback = function()
+      local player = game.Players.LocalPlayer
+      local backpack = player.Backpack
+      
+      local tool = game.ReplicatedStorage.Tools["RedHyperLaser"]:Clone()
+      
+      -- Fix LocalScripts & ServerScripts
+      for _, script in pairs(tool:GetDescendants()) do
+         if script:IsA("LocalScript") or script:IsA("Script") then
+            script.Disabled = false
+         end
+      end
+      
+      tool.Parent = backpack
+   end,
+})
+
+Tab1:CreateButton({
+   Name = 'Admin Slap Tool (Fixed)',
+   Callback = function()
+      local player = game.Players.LocalPlayer
+      local backpack = player.Backpack
+      
+      -- Try multiple possible paths for Admin Slap
+      local possiblePaths = {
+         game.ReplicatedStorage:FindFirstChild("Admin Slap", true),
+         game.ReplicatedStorage.Tools:FindFirstChild("Admin Slap"),
+         game.ReplicatedStorage:FindFirstChild("Slap", true),
+         workspace:FindFirstChild("Admin Slap", true)
+      }
+      
+      local slapTool = nil
+      for _, path in pairs(possiblePaths) do
+         if path and path:IsA("Tool") then
+            slapTool = path
+            break
+         end
+      end
+      
+      if slapTool then
+         local toolClone = slapTool:Clone()
+         
+         -- Fix ALL scripts in the tool
+         for _, obj in pairs(toolClone:GetDescendants()) do
+            if obj:IsA("LocalScript") or obj:IsA("Script") then
+               obj.Disabled = false
+            end
+         end
+         
+         toolClone.Parent = backpack
+         Rayfield:Notify({
+            Title = "Success",
+            Content = "Admin Slap added to backpack!",
+            Duration = 2.5,
+            Image = 4483362458
+         })
+      else
+         Rayfield:Notify({
+            Title = "Error",
+            Content = "Admin Slap not found. Check ReplicatedStorage.",
+            Duration = 3,
+            Image = 4483362458
+         })
+      end
+   end,
+})
+
+-- Tab 2: Anti Ragdoll
+local Tab2 = Window:CreateTab("Anti Ragdoll")
+local Section2 = Tab2:CreateSection("Protection")
+
+local antiRagdollEnabled = false
+
+Tab2:CreateToggle({
+   Name = 'Anti Ragdoll',
+   CurrentValue = false,
+   Flag = 'AntiRagdollToggle',
+   Callback = function(Value)
+      antiRagdollEnabled = Value
+      
+      local player = game.Players.LocalPlayer
+      local character = player.Character or player.CharacterAdded:Wait()
+      local humanoid = character:WaitForChild("Humanoid")
+      
+      if Value then
+         humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+         humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+         humanoid.PlatformStand = false
+      else
+         humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+         humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+      end
+   end,
+})
+
+-- Tab 3: Fly
+local Tab3 = Window:CreateTab("Fly")
+local Section3 = Tab3:CreateSection("Movement")
+
+local flying = false
+local bodyVelocity = nil
+local bodyGyro = nil
+local flySpeed = 50
+
+Tab3:CreateSlider({
+   Name = 'Fly Speed',
+   Range = {16, 200},
+   Increment = 1,
+   Suffix = " Speed",
+   CurrentValue = 50,
+   Flag = 'FlySpeedSlider',
+   Callback = function(Value)
+      flySpeed = Value
+   end,
+})
+
+Tab3:CreateKeybind({
+   Name = 'Fly Keybind',
+   CurrentKeybind = "F",
+   HoldToInteract = false,
+   Flag = "FlyKeybind",
+   Callback = function(Keybind)
+      flying = not flying
+      
+      local player = game.Players.LocalPlayer
+      local character = player.Character
+      if not character then return end
+      
+      local humanoid = character:FindFirstChild("Humanoid")
+      local rootPart = character:FindFirstChild("HumanoidRootPart")
+      if not humanoid or not rootPart then return end
+      
+      if flying then
+         bodyGyro = Instance.new("BodyGyro")
+         bodyGyro.MaxTorque = Vector3.new(400000, 400000, 400000)
+         bodyGyro.P = 20000
+         bodyGyro.Parent = rootPart
+         
+         bodyVelocity = Instance.new("BodyVelocity")
+         bodyVelocity.MaxForce = Vector3.new(400000, 400000, 400000)
+         bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+         bodyVelocity.Parent = rootPart
+         
+         humanoid.PlatformStand = true
+         
+         spawn(function()
+            while flying and character.Parent do
+               local camera = workspace.CurrentCamera
+               local moveVector = Vector3.new(0, 0, 0)
+               
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.W) then
+                  moveVector = moveVector + camera.CFrame.LookVector
+               end
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.S) then
+                  moveVector = moveVector - camera.CFrame.LookVector
+               end
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.A) then
+                  moveVector = moveVector - camera.CFrame.RightVector
+               end
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.D) then
+                  moveVector = moveVector + camera.CFrame.RightVector
+               end
+               
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.Space) then
+                  moveVector = moveVector + Vector3.new(0, 1, 0)
+               end
+               if game:GetService("UserInputService"):IsKeyDown(Enum.KeyCode.LeftShift) then
+                  moveVector = moveVector - Vector3.new(0, 1, 0)
+               end
+               
+               bodyVelocity.Velocity = moveVector * flySpeed
+               bodyGyro.CFrame = camera.CFrame
+               
+               wait()
+            end
+         end)
+         
+      else
+         if bodyVelocity then bodyVelocity:Destroy() end
+         if bodyGyro then bodyGyro:Destroy() end
+         humanoid.PlatformStand = false
+      end
+   end,
+})
+
+-- NEW Tab 4: Teleport
+local Tab4 = Window:CreateTab("TP")
+local Section4 = Tab4:CreateSection("Teleports")
+
+Tab4:CreateButton({
+   Name = 'TP to End (31.96, -457.02, -54.12)',
+   Callback = function()
+      local player = game.Players.LocalPlayer
+      local character = player.Character
+      if not character then return end
+      
+      local rootPart = character:FindFirstChild("HumanoidRootPart")
+      if rootPart then
+         rootPart.CFrame = CFrame.new(31.957923889160156, -457.0199890136719, -54.116859436035156)
+         Rayfield:Notify({
+            Title = "Teleport",
+            Content = "Teleported to End!",
+            Duration = 2,
+            Image = 4483362458
+         })
+      end
+   end,
+})
+
+-- Cleanup handlers
+game.Players.LocalPlayer.CharacterAdded:Connect(function()
+   if bodyVelocity then bodyVelocity:Destroy() end
+   if bodyGyro then bodyGyro:Destroy() end
+   flying = false
+   if antiRagdollEnabled then
+      task.wait(1)
+      local character = game.Players.LocalPlayer.Character
+      local humanoid = character:WaitForChild("Humanoid")
+      humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+      humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+   end
+end)
