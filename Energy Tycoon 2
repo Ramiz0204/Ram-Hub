@@ -1,0 +1,933 @@
+
+https://www.roblox.com/games/13212672826/Energy-Tycoon-2
+
+-- ================================================
+-- DEX EXPLORER v9 - WeaponFired + Sit Freeze
+-- ================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local WeaponFired = ReplicatedStorage:WaitForChild("WeaponsSystem"):WaitForChild("Network"):WaitForChild("WeaponFired")
+local Terrain = Workspace:WaitForChild("Terrain")
+
+local MAX_VALUE = 999999999999999999
+
+-- ================================================
+-- CONFIG
+-- ================================================
+local Config = {
+    HookEnabled   = false,
+    AutoCollect   = false,
+    SitEnabled    = false,
+    AutoTPEnemies = false,
+    KillAura      = false,
+    InfAmmo       = false,
+    AutoBuy       = false,
+    AutoRebirth   = false,
+    AuraFireRate  = 0.05,
+    MaxDistance   = 9999,
+    SID = 11,
+    PID = 1,
+    FireDelay = 0.05,
+}
+
+-- Auto-sit loop: friert neue Enemies ein sobald sie spawnen
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if Config.SitEnabled then
+            local es = Workspace:FindFirstChild("EnemySystem")
+            local folder = es and es:FindFirstChild("ActiveEnemies")
+            if folder then
+                for _, enemy in ipairs(folder:GetChildren()) do
+                    local hum = enemy:FindFirstChildOfClass("Humanoid")
+                    if hum and not hum.Sit then
+                        pcall(function() hum.Sit = true end)
+                    end
+                end
+            end
+        end
+
+        -- Auto TP enemies to player
+        if Config.AutoTPEnemies then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local es = Workspace:FindFirstChild("EnemySystem")
+                local folder = es and es:FindFirstChild("ActiveEnemies")
+                if folder then
+                    for i, enemy in ipairs(folder:GetChildren()) do
+                        local root = enemy:FindFirstChild("HumanoidRootPart")
+                        if root then
+                            -- Spread enemies in circle around player so they dont stack
+                            local angle = (i / #folder:GetChildren()) * math.pi * 2
+                            local offset = Vector3.new(math.cos(angle) * 5, 0, math.sin(angle) * 5)
+                            pcall(function()
+                                root.CFrame = hrp.CFrame * CFrame.new(offset)
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Kill Stats
+local KillStats = {
+    Total = 0,
+    Session = 0,
+    LastKill = "None",
+    PerMinute = 0,
+    SessionStart = os.time(),
+}
+
+-- ================================================
+-- WEAPON DETECT
+-- ================================================
+local function getWeapon()
+    local char = LocalPlayer.Character
+    if char then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") then return t end
+        end
+    end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") then return t end
+        end
+    end
+    return nil
+end
+
+local function getWeaponName()
+    local w = getWeapon()
+    return w and w.Name or "Keine Waffe"
+end
+
+-- ================================================
+-- RAYFIELD
+-- ================================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "⚔️ Dex Explorer v9",
+    LoadingTitle = "Dex Explorer",
+    LoadingSubtitle = "WeaponFired Edition",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
+
+-- ================================================
+-- GET ENEMIES
+-- ================================================
+local function getEnemies()
+    local enemies = {}
+    local enemySystem = Workspace:FindFirstChild("EnemySystem")
+    if not enemySystem then return enemies end
+    local folder = enemySystem:FindFirstChild("ActiveEnemies")
+    if not folder then return enemies end
+    for _, enemy in ipairs(folder:GetChildren()) do
+        local root = enemy:FindFirstChild("HumanoidRootPart")
+        local hum = enemy:FindFirstChildOfClass("Humanoid")
+        if root and hum and hum.Health > 0 then
+            table.insert(enemies, { model = enemy, root = root, hum = hum, name = enemy.Name })
+        end
+    end
+    return enemies
+end
+
+local function getNearestEnemy()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local myRoot = char:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local myPos = myRoot.Position
+    local nearest, nearestDist = nil, math.huge
+    for _, e in ipairs(getEnemies()) do
+        local dist = (e.root.Position - myPos).Magnitude
+        if dist < nearestDist then
+            nearestDist = dist
+            nearest = { data = e, dist = dist }
+        end
+    end
+    return nearest
+end
+
+-- ================================================
+-- KILL TRACKING
+-- ================================================
+local trackedEnemies = {}
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        local es = Workspace:FindFirstChild("EnemySystem")
+        local folder = es and es:FindFirstChild("ActiveEnemies")
+        if folder then
+            for _, enemy in ipairs(folder:GetChildren()) do
+                local hum = enemy:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local prev = trackedEnemies[enemy]
+                    if prev and prev > 0 and hum.Health <= 0 then
+                        KillStats.Total += 1
+                        KillStats.Session += 1
+                        KillStats.LastKill = enemy.Name
+                        local elapsed = math.max(1, os.time() - KillStats.SessionStart)
+                        KillStats.PerMinute = math.floor((KillStats.Session / elapsed) * 60 * 10) / 10
+                    end
+                    trackedEnemies[enemy] = hum.Health
+                end
+            end
+            for e in pairs(trackedEnemies) do
+                if not e.Parent then trackedEnemies[e] = nil end
+            end
+        end
+    end
+end)
+
+local WeaponHit = ReplicatedStorage:WaitForChild("WeaponsSystem"):WaitForChild("Network"):WaitForChild("WeaponHit")
+
+-- ================================================
+-- FIRE ON SINGLE ENEMY
+-- ================================================
+local shotID = 1
+
+local function fireOnEnemy(weapon, enemyData)
+    local char = LocalPlayer.Character
+    local myRoot = char and char:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not weapon then return end
+
+    local origin = myRoot.Position
+    local root = enemyData.root
+    local enemyPos = root.Position + Vector3.new(0, 1, 0)
+    local dir = (enemyPos - origin).Unit
+    local dist = (enemyPos - origin).Magnitude
+
+    -- Step 1: WeaponFired (starts the bullet)
+    pcall(function()
+        WeaponFired:FireServer(weapon, {
+            id     = shotID,
+            charge = 0,
+            origin = origin,
+            dir    = dir,
+        })
+    end)
+
+    -- Step 2: WeaponHit (registers the damage on enemy)
+    pcall(function()
+        WeaponHit:FireServer(weapon, {
+            p       = enemyPos,
+            pid     = shotID,
+            part    = root,
+            d       = dist,
+            maxDist = dist + 999,
+            h       = root,
+            m       = Enum.Material.SmoothPlastic,
+            n       = Vector3.yAxis,
+            t       = 0,
+            sid     = shotID,
+        })
+    end)
+
+    shotID += 1
+end
+
+-- ================================================
+-- AUTO SHOOT LOOP
+-- ================================================
+local shootThread = nil
+
+local function startAutoShoot()
+    if shootThread then return end
+    shootThread = task.spawn(function()
+        while Config.HookEnabled do
+            local weapon = getWeapon()
+            if weapon then
+                for _, enemy in ipairs(getEnemies()) do
+                    if not Config.HookEnabled then break end
+                    fireOnEnemy(weapon, enemy)
+                    task.wait(0.05)
+                end
+            end
+            task.wait(Config.FireDelay)
+        end
+        shootThread = nil
+    end)
+end
+
+-- ================================================
+-- TAB: AUTO BUY
+-- ================================================
+local buyThread = nil
+local BuyTab = Window:CreateTab("🛒 Auto Buy", 4483362458)
+BuyTab:CreateSection("Auto Buy Buttons")
+BuyTab:CreateLabel("Kauft ButtonActive Parts in workspace.Tycoons.Tycoon.Buttons")
+
+local buyStatusLabel = BuyTab:CreateLabel("Status: Inaktiv")
+local buyRangeValue = 9999
+
+local function buyNearby(hrp)
+    local count = 0
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+
+    local nearbyParts = Workspace:GetPartBoundsInRadius(hrp.Position, buyRangeValue, params)
+
+    for _, part in ipairs(nearbyParts) do
+        if not part:IsDescendantOf(Workspace.Tycoons) then continue end
+        if not part:FindFirstChildOfClass("TouchTransmitter") then continue end
+
+        -- Check if button is already purchased
+        -- Walk up to find the button model and check ButtonActive BoolValue
+        local buttonModel = part.Parent
+        while buttonModel and not buttonModel.Parent:IsA("Folder") do
+            buttonModel = buttonModel.Parent
+        end
+
+        local alreadyBought = false
+        if buttonModel then
+            local boolVal = buttonModel:FindFirstChild("ButtonActive")
+            -- If ButtonActive is a BoolValue and it's false = already bought
+            if boolVal and boolVal:IsA("BoolValue") and boolVal.Value == false then
+                alreadyBought = true
+            end
+            -- If ButtonActive doesn't exist anymore = already bought
+            if not boolVal then
+                alreadyBought = true
+            end
+        end
+
+        if not alreadyBought then
+            pcall(function()
+                firetouchinterest(hrp, part, 0)
+                task.wait(0.05)
+                firetouchinterest(hrp, part, 1)
+            end)
+            count += 1
+        end
+    end
+    return count
+end
+
+BuyTab:CreateToggle({
+    Name = "🛒 Auto Buy AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoBuy",
+    Callback = function(value)
+        Config.AutoBuy = value
+        if value then
+            if buyThread then return end
+            buyThread = task.spawn(function()
+                while Config.AutoBuy do
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local count = buyNearby(hrp)
+                        buyStatusLabel:Set("Status: ✅ AKTIV | " .. count .. " gekauft | Range: " .. buyRangeValue)
+                    end
+                    task.wait(0.5)
+                end
+                buyThread = nil
+                buyStatusLabel:Set("Status: Inaktiv")
+            end)
+            Rayfield:Notify({ Title = "🛒 Auto Buy ON", Content = "Live Erkennung aktiv!", Duration = 3 })
+        else
+            buyThread = nil
+            buyStatusLabel:Set("Status: Inaktiv")
+            Rayfield:Notify({ Title = "🛒 Auto Buy OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+BuyTab:CreateSlider({
+    Name = "Reichweite",
+    Range = {10, 9999},
+    Increment = 10,
+    Suffix = " studs",
+    CurrentValue = 9999,
+    Flag = "BuyRange",
+    Callback = function(v) buyRangeValue = v end,
+})
+
+BuyTab:CreateButton({
+    Name = "🛒 Einmalig alle kaufen",
+    Callback = function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local count = buyNearby(hrp)
+        Rayfield:Notify({ Title = "🛒 Fertig!", Content = count .. " Buttons gefeuert!", Duration = 3 })
+    end,
+})
+
+local weaponLabel = BuyTab:CreateLabel("🔫 Waffe: " .. getWeaponName())
+local enemyLabel = BuyTab:CreateLabel("Enemies: 0")
+
+-- ================================================
+-- TAB: KILL STATS
+-- ================================================
+local KillTab = Window:CreateTab("💀 Kill Stats", 4483362458)
+KillTab:CreateSection("Live Kill Counter")
+
+local killTotalLabel   = KillTab:CreateLabel("💀 Total Kills:    0")
+local killSessionLabel = KillTab:CreateLabel("⚔️  Session Kills: 0")
+local killPerMinLabel  = KillTab:CreateLabel("⚡ Kills/Min:      0")
+local killLastLabel    = KillTab:CreateLabel("🎯 Last Kill:      None")
+local killTimeLabel    = KillTab:CreateLabel("⏱️  Session Time:  0s")
+
+KillTab:CreateSection("Controls")
+KillTab:CreateButton({
+    Name = "🔄 Reset Session",
+    Callback = function()
+        KillStats.Session = 0
+        KillStats.PerMinute = 0
+        KillStats.SessionStart = os.time()
+        KillStats.LastKill = "None"
+        Rayfield:Notify({ Title = "✅ Reset", Content = "Session zurückgesetzt!", Duration = 2 })
+    end,
+})
+
+-- Live updater
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local elapsed = os.time() - KillStats.SessionStart
+        local timeStr = string.format("%dm %ds", math.floor(elapsed/60), elapsed%60)
+        killTotalLabel:Set(  "💀 Total Kills:    " .. KillStats.Total)
+        killSessionLabel:Set("⚔️  Session Kills: " .. KillStats.Session)
+        killPerMinLabel:Set( "⚡ Kills/Min:      " .. KillStats.PerMinute)
+        killLastLabel:Set(   "🎯 Last Kill:      " .. KillStats.LastKill)
+        killTimeLabel:Set(   "⏱️  Session Time:  " .. timeStr)
+
+        local enemies = getEnemies()
+        local nearest = getNearestEnemy()
+        local info = nearest
+            and string.format(" | Nearest: %s (%.0f st)", nearest.data.name, nearest.dist)
+            or " | Keine Enemies"
+        enemyLabel:Set("Enemies alive: " .. #enemies .. info)
+        weaponLabel:Set("🔫 Waffe: " .. getWeaponName())
+    end
+end)
+
+-- ================================================
+-- TAB: KILL AURA
+-- ================================================
+local auraThread = nil
+local KillAuraTab = Window:CreateTab("💥 Kill Aura", 4483362458)
+KillAuraTab:CreateSection("Kill Aura")
+KillAuraTab:CreateLabel("⚠️ Du musst in einer Mob Area sein mit einer Waffe!")
+
+local auraStatusLabel = KillAuraTab:CreateLabel("Status: Inaktiv")
+
+KillAuraTab:CreateToggle({
+    Name = "💥 Kill Aura (Auto TP + Sit + Kill)",
+    CurrentValue = false,
+    Flag = "KillAura",
+    Callback = function(value)
+        Config.KillAura = value
+        Config.SitEnabled = value
+        Config.AutoTPEnemies = value
+
+        if value then
+            -- Check: Hat der Player eine Waffe?
+            local weapon = getWeapon()
+            if not weapon then
+                Config.KillAura = false
+                Config.SitEnabled = false
+                Config.AutoTPEnemies = false
+                Rayfield:Notify({
+                    Title = "⚠️ Keine Waffe!",
+                    Content = "Du musst in einer Mob Area sein mit einer Waffe!",
+                    Duration = 4,
+                })
+                return
+            end
+
+            -- Check: Gibt es Enemies?
+            local enemies = getEnemies()
+            if #enemies == 0 then
+                Rayfield:Notify({
+                    Title = "⚠️ Keine Enemies!",
+                    Content = "Du musst in einer Mob Area sein mit einer Waffe!",
+                    Duration = 4,
+                })
+                -- Trotzdem starten, vielleicht spawnen gleich welche
+            end
+
+            if auraThread then return end
+            auraThread = task.spawn(function()
+                while Config.KillAura do
+                    local wp = getWeapon()
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+                    if not wp then
+                        auraStatusLabel:Set("⚠️ Keine Waffe gefunden!")
+                        task.wait(1)
+                        continue
+                    end
+
+                    if hrp then
+                        local es = Workspace:FindFirstChild("EnemySystem")
+                        local folder = es and es:FindFirstChild("ActiveEnemies")
+                        if folder then
+                            local list = folder:GetChildren()
+                            for i, enemy in ipairs(list) do
+                                if not Config.KillAura then break end
+
+                                local root = enemy:FindFirstChild("HumanoidRootPart")
+                                local hum = enemy:FindFirstChildOfClass("Humanoid")
+
+                                if root and hum then
+                                    -- Auto Sit
+                                    if not hum.Sit then
+                                        pcall(function() hum.Sit = true end)
+                                    end
+
+                                    -- Auto TP zu Player (Kreis)
+                                    local angle = (i / #list) * math.pi * 2
+                                    local offset = Vector3.new(math.cos(angle) * 4, 0, math.sin(angle) * 4)
+                                    pcall(function()
+                                        root.CFrame = hrp.CFrame * CFrame.new(offset)
+                                    end)
+
+                                    -- Kill
+                                    if hum.Health > 0 then
+                                        local eData = { root = root, hum = hum, name = enemy.Name, model = enemy }
+                                        fireOnEnemy(wp, eData)
+                                    end
+                                end
+                            end
+                            auraStatusLabel:Set("Status: 💥 AKTIV | Enemies: " .. #list)
+                        else
+                            auraStatusLabel:Set("⚠️ Keine Mob Area gefunden!")
+                        end
+                    end
+
+                    task.wait(Config.AuraFireRate)
+                end
+                auraThread = nil
+                auraStatusLabel:Set("Status: Inaktiv")
+            end)
+
+            Rayfield:Notify({
+                Title = "💥 Kill Aura ON",
+                Content = "Auto TP + Sit + Kill aktiv!",
+                Duration = 3,
+            })
+        else
+            auraThread = nil
+            auraStatusLabel:Set("Status: Inaktiv")
+            -- Sit ausschalten
+            local es = Workspace:FindFirstChild("EnemySystem")
+            local folder = es and es:FindFirstChild("ActiveEnemies")
+            if folder then
+                for _, enemy in ipairs(folder:GetChildren()) do
+                    local hum = enemy:FindFirstChildOfClass("Humanoid")
+                    if hum then pcall(function() hum.Sit = false end) end
+                end
+            end
+            Rayfield:Notify({ Title = "💥 Kill Aura OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+KillAuraTab:CreateSlider({
+    Name = "Aura Fire Rate",
+    Range = {0.01, 1},
+    Increment = 0.01,
+    Suffix = "s",
+    CurrentValue = 0.05,
+    Flag = "AuraFireRate",
+    Callback = function(v) Config.AuraFireRate = v end,
+})
+
+KillAuraTab:CreateSection("Infinite Ammo")
+
+KillAuraTab:CreateToggle({
+    Name = "🔫 Infinite Ammo",
+    CurrentValue = false,
+    Flag = "InfAmmo",
+    Callback = function(value)
+        Config.InfAmmo = value
+        if value then
+            startInfAmmo()
+            Rayfield:Notify({ Title = "🔫 Inf Ammo ON", Content = "AmmoCapacity = " .. MAX_VALUE, Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "🔫 Inf Ammo OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+KillAuraTab:CreateButton({
+    Name = "🔫 Einmalig MAX Ammo",
+    Callback = function()
+        setInfAmmo()
+        Rayfield:Notify({ Title = "✅ Ammo", Content = "Alle Waffen → MAX", Duration = 2 })
+    end,
+})
+
+-- Live aura status updater
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if Config.KillAura then
+            local enemies = getEnemies()
+            auraStatusLabel:Set("Status: 💥 AKTIV | Enemies: " .. #enemies)
+        end
+    end
+end)
+
+-- ================================================
+-- TAB: AUTO COLLECT
+-- ================================================
+local collectThread = nil
+local CollectTab = Window:CreateTab("💰 Auto Collect", 4483362458)
+CollectTab:CreateSection("Money Collector")
+
+CollectTab:CreateToggle({
+    Name = "💰 Auto Collect Money",
+    CurrentValue = false,
+    Flag = "AutoCollect",
+    Callback = function(value)
+        Config.AutoCollect = value
+        if value then
+            if collectThread then return end
+            collectThread = task.spawn(function()
+                while Config.AutoCollect do
+                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    local ok, giver = pcall(function()
+                        return Workspace.Tycoons.Tycoon.Essentials.Collector.Giver
+                    end)
+                    if ok and giver and hrp then
+                        pcall(function()
+                            firetouchinterest(hrp, giver, 0)
+                            task.wait()
+                            firetouchinterest(hrp, giver, 1)
+                        end)
+                    end
+                    task.wait(0.5)
+                end
+                collectThread = nil
+            end)
+            Rayfield:Notify({ Title = "💰 ON", Content = "Auto Collect gestartet!", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "💰 OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+CollectTab:CreateLabel("Interval: 0.5s | firetouchinterest")
+
+-- ================================================
+-- TAB: AUTO REBIRTH
+-- ================================================
+local RebirthRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Rebirth")
+local rebirthThread = nil
+local RebirthTab = Window:CreateTab("🔄 Auto Rebirth", 4483362458)
+RebirthTab:CreateSection("Auto Rebirth")
+
+local rebirthStatusLabel = RebirthTab:CreateLabel("Status: Inaktiv | Rebirths: 0")
+local rebirthCount = 0
+local rebirthDelay = 3
+
+RebirthTab:CreateToggle({
+    Name = "🔄 Auto Rebirth AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoRebirth",
+    Callback = function(value)
+        Config.AutoRebirth = value
+        if value then
+            if rebirthThread then return end
+            rebirthThread = task.spawn(function()
+                while Config.AutoRebirth do
+                    local ok, result = pcall(function()
+                        return RebirthRemote:InvokeServer()
+                    end)
+                    if ok and result then
+                        rebirthCount += 1
+                        rebirthStatusLabel:Set("Status: ✅ AKTIV | Rebirths: " .. rebirthCount)
+                        Rayfield:Notify({
+                            Title = "🔄 Rebirth!",
+                            Content = "Rebirth #" .. rebirthCount .. " erfolgreich!",
+                            Duration = 2,
+                        })
+                    else
+                        rebirthStatusLabel:Set("Status: ⏳ Warte... | Rebirths: " .. rebirthCount)
+                    end
+                    task.wait(rebirthDelay)
+                end
+                rebirthThread = nil
+                rebirthStatusLabel:Set("Status: Inaktiv | Rebirths: " .. rebirthCount)
+            end)
+            Rayfield:Notify({ Title = "🔄 Auto Rebirth ON", Content = "Rebirthet automatisch!", Duration = 3 })
+        else
+            rebirthThread = nil
+            rebirthStatusLabel:Set("Status: Inaktiv | Rebirths: " .. rebirthCount)
+            Rayfield:Notify({ Title = "🔄 Auto Rebirth OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+RebirthTab:CreateSlider({
+    Name = "Delay zwischen Rebirths",
+    Range = {1, 30},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = 3,
+    Flag = "RebirthDelay",
+    Callback = function(v) rebirthDelay = v end,
+})
+
+RebirthTab:CreateButton({
+    Name = "🔄 Einmalig Rebirth",
+    Callback = function()
+        local ok, result = pcall(function()
+            return RebirthRemote:InvokeServer()
+        end)
+        if ok and result then
+            rebirthCount += 1
+            rebirthStatusLabel:Set("Status: Inaktiv | Rebirths: " .. rebirthCount)
+            Rayfield:Notify({ Title = "🔄 Rebirth!", Content = "Erfolgreich! Total: " .. rebirthCount, Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "⚠️ Rebirth", Content = "Nicht möglich — noch nicht bereit!", Duration = 3 })
+        end
+    end,
+})
+
+RebirthTab:CreateButton({
+    Name = "🔢 Rebirth Counter reset",
+    Callback = function()
+        rebirthCount = 0
+        rebirthStatusLabel:Set("Status: Inaktiv | Rebirths: 0")
+    end,
+})
+
+-- ================================================
+-- TAB: STATS
+-- ================================================
+local InfoFolder = ReplicatedStorage.InfoFolder
+
+local function getVal(name)
+    local obj = InfoFolder:FindFirstChild(name)
+    return obj and obj.Value or 0
+end
+
+local function setVal(name, value)
+    local obj = InfoFolder:FindFirstChild(name)
+    if obj then
+        local num = tonumber(value)
+        if num then obj.Value = num return true end
+        Rayfield:Notify({ Title = "⚠️ Fehler", Content = "Ungültige Zahl!", Duration = 3 })
+    end
+    return false
+end
+
+local statNames = {"AllocatablePoints","Level","CurrentEXP","ExpMax","DamageMultiplier","AttackSpeedMultiplier","MaxHealthMultiplier","CoilEfficiencyMultiplier","ExpMultiplier"}
+local OriginalValues = {}
+for _, name in ipairs(statNames) do OriginalValues[name] = getVal(name) end
+
+local StatsTab = Window:CreateTab("📊 Stats", 4483362458)
+StatsTab:CreateSection("Character Stats")
+
+for _, name in ipairs({"AllocatablePoints","Level","CurrentEXP","ExpMax"}) do
+    StatsTab:CreateInput({
+        Name = name .. "  [" .. tostring(getVal(name)) .. "]",
+        PlaceholderText = "Zahl eingeben...",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(v) setVal(name, v) end,
+    })
+    StatsTab:CreateButton({
+        Name = "🔥 " .. name .. " → MAX",
+        Callback = function()
+            setVal(name, MAX_VALUE)
+            Rayfield:Notify({ Title = "🔥 MAX", Content = name .. " gesetzt!", Duration = 2 })
+        end,
+    })
+end
+
+StatsTab:CreateSection("Multipliers")
+for _, name in ipairs({"DamageMultiplier","AttackSpeedMultiplier","MaxHealthMultiplier","CoilEfficiencyMultiplier","ExpMultiplier"}) do
+    StatsTab:CreateSlider({
+        Name = name, Range = {0, 999}, Increment = 0.1, Suffix = "x",
+        CurrentValue = math.min(tonumber(getVal(name)) or 1, 999),
+        Flag = name,
+        Callback = function(v) setVal(name, v) end,
+    })
+    StatsTab:CreateButton({
+        Name = "🔥 " .. name .. " → MAX",
+        Callback = function()
+            setVal(name, MAX_VALUE)
+            Rayfield:Notify({ Title = "🔥 MAX", Content = name .. " gesetzt!", Duration = 2 })
+        end,
+    })
+end
+
+StatsTab:CreateSection("Reset")
+StatsTab:CreateButton({
+    Name = "🔄 Reset ALL Stats",
+    Callback = function()
+        for _, name in ipairs(statNames) do setVal(name, OriginalValues[name]) end
+        Rayfield:Notify({ Title = "✅ Reset", Content = "Alle Werte zurückgesetzt!", Duration = 3 })
+    end,
+})
+
+-- ================================================
+-- TAB: SPEED
+-- ================================================
+local SpeedTab = Window:CreateTab("🏃 Speed", 4483362458)
+SpeedTab:CreateSection("Movement")
+
+SpeedTab:CreateSlider({
+    Name = "WalkSpeed", Range = {0,500}, Increment = 1, Suffix = "", CurrentValue = 16, Flag = "WalkSpeed2",
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        if char then local h = char:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = v end end
+    end,
+})
+SpeedTab:CreateSlider({
+    Name = "JumpPower", Range = {0,500}, Increment = 1, Suffix = "", CurrentValue = 50, Flag = "JumpPower2",
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        if char then local h = char:FindFirstChildOfClass("Humanoid") if h then h.JumpPower = v end end
+    end,
+})
+SpeedTab:CreateButton({
+    Name = "🚀 Speed MAX (500)",
+    Callback = function()
+        local char = LocalPlayer.Character
+        if char then local h = char:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = 500 end end
+        Rayfield:Notify({ Title = "🚀", Content = "WalkSpeed = 500", Duration = 2 })
+    end,
+})
+SpeedTab:CreateButton({
+    Name = "🔄 Reset Speed",
+    Callback = function()
+        local char = LocalPlayer.Character
+        if char then local h = char:FindFirstChildOfClass("Humanoid") if h then h.WalkSpeed = 16 h.JumpPower = 50 end end
+        Rayfield:Notify({ Title = "✅", Content = "Speed reset!", Duration = 2 })
+    end,
+})
+
+-- ================================================
+-- KEYBINDS
+-- ================================================
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    -- F = Kill Aura Toggle
+    if input.KeyCode == Enum.KeyCode.F then
+        Config.KillAura = not Config.KillAura
+        if Config.KillAura then
+            if not auraThread then
+                auraThread = task.spawn(function()
+                    while Config.KillAura do
+                        local weapon = getWeapon()
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        if weapon and hrp then
+                            for _, enemy in ipairs(getEnemies()) do
+                                if not Config.KillAura then break end
+                                if enemy.root and enemy.root.Parent and enemy.hum.Health > 0 then
+                                    fireOnEnemy(weapon, enemy)
+                                end
+                            end
+                        end
+                        task.wait(Config.AuraFireRate)
+                    end
+                    auraThread = nil
+                end)
+            end
+            Rayfield:Notify({ Title = "💥 [F] Kill Aura ON", Content = "Aura aktiv!", Duration = 2 })
+        else
+            auraThread = nil
+            Rayfield:Notify({ Title = "💥 [F] Kill Aura OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end
+
+    -- T = Sit Toggle
+    if input.KeyCode == Enum.KeyCode.T then
+        Config.SitEnabled = not Config.SitEnabled
+        local es = Workspace:FindFirstChild("EnemySystem")
+        local folder = es and es:FindFirstChild("ActiveEnemies")
+        if folder then
+            for _, enemy in ipairs(folder:GetChildren()) do
+                local hum = enemy:FindFirstChildOfClass("Humanoid")
+                if hum then pcall(function() hum.Sit = Config.SitEnabled end) end
+            end
+        end
+        if Config.SitEnabled then
+            Rayfield:Notify({ Title = "🪑 [T] Sit ON", Content = "Enemies eingefroren!", Duration = 2 })
+        else
+            Rayfield:Notify({ Title = "🪑 [T] Sit OFF", Content = "Enemies bewegen sich wieder.", Duration = 2 })
+        end
+    end
+end)
+
+-- ================================================
+-- INFINITE AMMO (functions used by KillAura tab)
+-- ================================================
+local infAmmoThread = nil
+
+local function setInfAmmo()
+    local function applyToTool(tool)
+        local config = tool:FindFirstChild("Configuration")
+        if config then
+            local ammo = config:FindFirstChild("AmmoCapacity")
+            if ammo then pcall(function() ammo.Value = MAX_VALUE end) end
+            local current = config:FindFirstChild("CurrentAmmo")
+                or config:FindFirstChild("Ammo")
+                or config:FindFirstChild("MagazineSize")
+            if current then pcall(function() current.Value = MAX_VALUE end) end
+        end
+        for _, v in ipairs(tool:GetDescendants()) do
+            if (v.Name:lower():find("ammo") or v.Name:lower():find("magazine"))
+            and (v:IsA("IntValue") or v:IsA("NumberValue")) then
+                pcall(function() v.Value = MAX_VALUE end)
+            end
+        end
+    end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then applyToTool(t) end end end
+    local char = LocalPlayer.Character
+    if char then for _, t in ipairs(char:GetChildren()) do if t:IsA("Tool") then applyToTool(t) end end end
+end
+
+local function startInfAmmo()
+    if infAmmoThread then return end
+    infAmmoThread = task.spawn(function()
+        while Config.InfAmmo do setInfAmmo() task.wait(0.1) end
+        infAmmoThread = nil
+    end)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and Config.InfAmmo then task.wait(0.1) setInfAmmo() end
+    end)
+end)
+if LocalPlayer.Character then
+    LocalPlayer.Character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and Config.InfAmmo then task.wait(0.1) setInfAmmo() end
+    end)
+end
+
+-- ================================================
+-- STARTUP
+-- ================================================
+Rayfield:Notify({
+    Title = "✅ Dex Explorer v9",
+    Content = "[F] Kill Aura  |  [T] Sit Freeze  |  💥",
+    Duration = 6,
+})
