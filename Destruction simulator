@@ -1,50 +1,753 @@
-_G.coins = true
-_G.inflvl = true
-_G.Coinsboost = true
-_G.xpboost = flase --not finish 
 
-spawn(function()
-while _G.coins == true do
-local args = {
-    [1] = "Coins",
-    [2] = 480,
-    [3] = 10000000
+https://www.roblox.com/games/2248408710/Destruction-Simulator
+
+
+
+
+
+
+-- ================================================
+-- DESTRUCTION SIMULATOR - Auto Destroy
+-- ================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local RocketRemote  = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("clientServerRocket")
+local ExplodeRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("explodeRocket")
+local SellRemote    = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("sellBricks")
+local AreaRemote    = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("areaChanged")
+
+-- ================================================
+-- RAYFIELD
+-- ================================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "💥 Destruction Sim",
+    LoadingTitle = "Destruction Simulator",
+    LoadingSubtitle = "Auto Destroy",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
+
+-- ================================================
+-- CONFIG
+-- ================================================
+local Config = {
+    AutoDestroy = false,
+    Delay       = 0.05,
+    StartArea   = 1,
+    EndArea     = 16,
+    AutoSell    = true,   -- sell after each area
+    SellDelay   = 0.5,
 }
 
-game:GetService("ReplicatedStorage").Remotes.generateBoost:FireServer(unpack(args))
-wait()
+local destroyThread = nil
+local totalHits     = 0
+local sessionStart  = os.time()
+
+-- ================================================
+-- GET LAUNCHER PARTS
+-- ================================================
+local function getLauncher()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local launcher = char:FindFirstChild("Launcher")
+    if not launcher then return nil end
+    return {
+        stats  = launcher:FindFirstChild("Stats"),
+        rocket = launcher:FindFirstChild("Assets") and launcher.Assets:FindFirstChild("Rocket"),
+        handle = launcher:FindFirstChild("Handle"),
+        boom   = launcher:FindFirstChild("Assets")
+            and launcher.Assets:FindFirstChild("Rocket")
+            and launcher.Assets.Rocket:FindFirstChild("Boom"),
+    }
 end
-end)
 
-spawn(function()
-while _G.inflvl == true do
-local args = {
-    [1] = "Levels",
-    [2] = 480,
-    [3] = 10
-}
+-- ================================================
+-- GET ALL BRICKS IN AREA
+-- ================================================
+local function getBricksInArea(areaName)
+    local bricks = {}
+    local areasFolder = Workspace:FindFirstChild("Areas")
+    if not areasFolder then return bricks end
+    local area = areasFolder:FindFirstChild(areaName)
+    if not area then return bricks end
 
-game:GetService("ReplicatedStorage").Remotes.generateBoost:FireServer(unpack(args))
-local args = {
-    [1] = "Levels",
-    [2] = 480,
-    [3] = 10
-}
-
-game:GetService("ReplicatedStorage").Remotes.generateBoost:FireServer(unpack(args))
-
-wait()
+    for _, obj in ipairs(area:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name ~= "Baseplate" then
+            table.insert(bricks, obj)
+        end
+    end
+    return bricks
 end
-end)
 
-spawn(function()
-while _G.Coinsboost == true do
-local args = {
-    [1] = "CoinBoost",
-    [2] = 9999999999
+local BombRemote   = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("clientServerBomb")
+local ExplodeBombRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("explodeBomb")
+
+-- ================================================
+-- GET BOMB PARTS
+-- ================================================
+local function getBomb()
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local char = LocalPlayer.Character
+    local bomb = (bp and bp:FindFirstChild("Bomb"))
+        or (char and char:FindFirstChild("Bomb"))
+    if not bomb then return nil end
+    return {
+        stats  = bomb:FindFirstChild("Stats"),
+        handle = bomb:FindFirstChild("Handle"),
+    }
+end
+
+-- ================================================
+-- SHOOT + EXPLODE ON POSITION (Launcher)
+-- ================================================
+local function shootAt(pos)
+    local launcher = getLauncher()
+    if not launcher or not launcher.stats or not launcher.rocket or not launcher.handle or not launcher.boom then
+        return false
+    end
+    local timestamp = tick()
+    local cf = CFrame.new(pos)
+    pcall(function()
+        RocketRemote:FireServer(timestamp, launcher.stats, launcher.rocket, launcher.handle, cf, launcher.boom)
+    end)
+    pcall(function()
+        ExplodeRemote:FireServer(timestamp, launcher.stats, Vector3.new(pos.X, pos.Y, pos.Z), launcher.boom)
+    end)
+    return true
+end
+
+-- ================================================
+-- DROP BOMB ON POSITION
+-- ================================================
+local function dropBombAt(pos)
+    local bomb = getBomb()
+    if not bomb or not bomb.stats or not bomb.handle then return false end
+    local timestamp = tick()
+    pcall(function()
+        BombRemote:FireServer(timestamp, bomb.stats, LocalPlayer, bomb.handle, bomb.handle, pos)
+    end)
+    pcall(function()
+        ExplodeBombRemote:FireServer(timestamp, bomb.stats, pos)
+    end)
+    return true
+end
+
+-- ================================================
+-- NUKE POSITION (Launcher + Bomb simultaneously)
+-- ================================================
+local function nukeAt(pos)
+    -- Fire both at same time in parallel
+    task.spawn(function() shootAt(pos) end)
+    task.spawn(function() dropBombAt(pos) end)
+end
+
+-- ================================================
+-- RAYFIELD TABS
+-- ================================================
+
+-- TAB: AUTO DESTROY
+local DestroyTab = Window:CreateTab("💥 Auto Destroy", 4483362458)
+DestroyTab:CreateSection("Select Area")
+
+local selectedArea = 1
+local statusLabel  = DestroyTab:CreateLabel("Status: Inaktiv")
+local areaLabel    = DestroyTab:CreateLabel("Selected Area: Area1")
+local hitsLabel    = DestroyTab:CreateLabel("💥 Total Hits: 0")
+local kpmLabel     = DestroyTab:CreateLabel("⚡ Hits/Min: 0")
+
+DestroyTab:CreateSlider({
+    Name = "Area auswählen",
+    Range = {1, 16},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = 1,
+    Flag = "SelectedArea",
+    Callback = function(v)
+        selectedArea = v
+        areaLabel:Set("Selected Area: Area" .. v)
+        -- Tell server we entered this area
+        pcall(function() AreaRemote:FireServer("Area" .. v) end)
+    end,
+})
+
+DestroyTab:CreateSection("Auto Destroy")
+
+local nukeMode = true
+local allAreas = false
+local destroyThreadLauncher = nil
+local destroyThreadBomb = nil
+
+DestroyTab:CreateToggle({
+    Name = "💥 Nuke Mode (Launcher + Bomb)",
+    CurrentValue = true,
+    Flag = "NukeMode",
+    Callback = function(v)
+        nukeMode = v
+        Rayfield:Notify({ Title = v and "💥 Nuke Mode ON" or "🚀 Launcher Only", Content = v and "Launcher + Bomb parallel!" or "Nur Launcher", Duration = 2 })
+    end,
+})
+
+DestroyTab:CreateToggle({
+    Name = "🌍 Alle Areas gleichzeitig",
+    CurrentValue = false,
+    Flag = "AllAreas",
+    Callback = function(v)
+        allAreas = v
+        Rayfield:Notify({ Title = v and "🌍 Alle Areas ON" or "📍 Eine Area", Content = v and "Zerstört Area 1-16 gleichzeitig!" or "Nur gewählte Area", Duration = 2 })
+    end,
+})
+
+DestroyTab:CreateToggle({
+    Name = "💥 Auto Destroy AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoDestroy",
+    Callback = function(value)
+        Config.AutoDestroy = value
+        if value then
+            local launcher = getLauncher()
+            if not launcher or not launcher.stats then
+                Config.AutoDestroy = false
+                Rayfield:Notify({ Title = "⚠️ Kein Launcher!", Content = "Du brauchst einen Launcher!", Duration = 4 })
+                return
+            end
+            sessionStart = os.time()
+
+            -- Get list of areas to destroy
+            local function getAreaList()
+                if allAreas then
+                    local list = {}
+                    for i = 1, 16 do table.insert(list, "Area" .. i) end
+                    return list
+                else
+                    return {"Area" .. selectedArea}
+                end
+            end
+
+            -- LAUNCHER THREAD
+            destroyThreadLauncher = task.spawn(function()
+                local loopCount = 0
+                while Config.AutoDestroy do
+                    loopCount += 1
+                    local areas = getAreaList()
+
+                    -- Fire each area in parallel
+                    for _, areaName in ipairs(areas) do
+                        task.spawn(function()
+                            pcall(function() AreaRemote:FireServer(areaName) end)
+                            local bricks = getBricksInArea(areaName)
+                            for _, brick in ipairs(bricks) do
+                                if not Config.AutoDestroy then break end
+                                if brick and brick.Parent then
+                                    pcall(function() shootAt(brick.Position) end)
+                                    totalHits += 1
+                                    hitsLabel:Set("💥 Total Hits: " .. totalHits)
+                                    local elapsed = math.max(1, os.time() - sessionStart)
+                                    kpmLabel:Set("⚡ Hits/Min: " .. math.floor((totalHits/elapsed)*60))
+                                    task.wait(Config.Delay)
+                                end
+                            end
+                        end)
+                    end
+
+                    statusLabel:Set("🚀 Launcher | Loop #" .. loopCount .. (allAreas and " | ALL AREAS" or " | Area" .. selectedArea))
+                    task.wait(0.5)
+                end
+                destroyThreadLauncher = nil
+            end)
+
+            -- BOMB THREAD (only if nuke mode)
+            if nukeMode then
+                destroyThreadBomb = task.spawn(function()
+                    local loopCount = 0
+                    while Config.AutoDestroy do
+                        loopCount += 1
+                        local areas = getAreaList()
+
+                        for _, areaName in ipairs(areas) do
+                            task.spawn(function()
+                                local bricks = getBricksInArea(areaName)
+                                for _, brick in ipairs(bricks) do
+                                    if not Config.AutoDestroy then break end
+                                    if brick and brick.Parent then
+                                        pcall(function() dropBombAt(brick.Position) end)
+                                        task.wait(Config.Delay)
+                                    end
+                                end
+                            end)
+                        end
+
+                        task.wait(0.5)
+                    end
+                    destroyThreadBomb = nil
+                end)
+            end
+
+            Rayfield:Notify({
+                Title = "💥 Auto Destroy ON",
+                Content = (nukeMode and "🚀+💣 NUKE | " or "🚀 | ") .. (allAreas and "ALLE 16 AREAS!" or "Area" .. selectedArea),
+                Duration = 3,
+            })
+        else
+            Config.AutoDestroy = false
+            destroyThreadLauncher = nil
+            destroyThreadBomb = nil
+            statusLabel:Set("Status: Inaktiv")
+            Rayfield:Notify({ Title = "💥 Auto Destroy OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+DestroyTab:CreateSlider({
+    Name = "Fire Delay",
+    Range = {0.01, 1},
+    Increment = 0.01,
+    Suffix = "s",
+    CurrentValue = 0.05,
+    Flag = "DestroyDelay",
+    Callback = function(v) Config.Delay = v end,
+})
+
+DestroyTab:CreateButton({
+    Name = "🔄 Stats Reset",
+    Callback = function()
+        totalHits = 0
+        sessionStart = os.time()
+        hitsLabel:Set("💥 Total Hits: 0")
+        kpmLabel:Set("⚡ Hits/Min: 0")
+    end,
+})
+
+DestroyTab:CreateSection("Backpack")
+
+DestroyTab:CreateButton({
+    Name = "🎒 Infinite Storage kaufen",
+    Callback = function()
+        local BuyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("buyItem")
+        pcall(function() BuyRemote:FireServer("Backpack", "Infinite Storage") end)
+        Rayfield:Notify({ Title = "🎒 Gekauft!", Content = "Infinite Storage!", Duration = 3 })
+    end,
+})
+
+DestroyTab:CreateToggle({
+    Name = "🎒 Auto Buy Infinite Storage",
+    CurrentValue = false,
+    Flag = "AutoBackpack",
+    Callback = function(value)
+        if value then
+            task.spawn(function()
+                local BuyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("buyItem")
+                while value do
+                    pcall(function() BuyRemote:FireServer("Backpack", "Infinite Storage") end)
+                    task.wait(0.5)
+                end
+            end)
+            Rayfield:Notify({ Title = "🎒 ON", Content = "Kauft Infinite Storage!", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "🎒 OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+-- ================================================
+-- TAB: AUTO SELL
+-- ================================================
+local sellThread = nil
+local SellTab = Window:CreateTab("💰 Auto Sell", 4483362458)
+SellTab:CreateSection("Auto Sell")
+SellTab:CreateLabel("Nutzt workspace.sellSpot + sellBricks Remote")
+
+local sellStatusLabel = SellTab:CreateLabel("Status: Inaktiv | Sold: 0")
+local sellCount = 0
+local sellDelay = 1
+
+SellTab:CreateToggle({
+    Name = "💰 Auto Sell AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoSell",
+    Callback = function(value)
+        Config.AutoSell = value
+        if value then
+            if sellThread then return end
+            sellThread = task.spawn(function()
+                local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+
+                -- TP to sell spot first
+                local sellSpot = Workspace:FindFirstChild("sellSpot")
+                if sellSpot and hrp then
+                    local sellPart = sellSpot:FindFirstChildOfClass("BasePart") or sellSpot
+                    if sellPart:IsA("BasePart") then
+                        pcall(function() hrp.CFrame = sellPart.CFrame + Vector3.new(0, 3, 0) end)
+                    end
+                end
+
+                while Config.AutoSell do
+                    -- firetouchinterest on sellSpot
+                    local spot = Workspace:FindFirstChild("sellSpot")
+                    local ch = LocalPlayer.Character
+                    local root = ch and ch:FindFirstChild("HumanoidRootPart")
+                    if spot and root then
+                        for _, part in ipairs(spot:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                pcall(function()
+                                    firetouchinterest(root, part, 0)
+                                    task.wait(0.05)
+                                    firetouchinterest(root, part, 1)
+                                end)
+                            end
+                        end
+                    end
+                    -- Also fire remote directly
+                    pcall(function() SellRemote:FireServer() end)
+                    sellCount += 1
+                    sellStatusLabel:Set("Status: ✅ AKTIV | Sold: " .. sellCount)
+                    task.wait(sellDelay)
+                end
+                sellThread = nil
+                sellStatusLabel:Set("Status: Inaktiv | Total Sold: " .. sellCount)
+            end)
+            Rayfield:Notify({ Title = "💰 Auto Sell ON", Content = "Verkauft automatisch!", Duration = 3 })
+        else
+            sellThread = nil
+            sellStatusLabel:Set("Status: Inaktiv | Total: " .. sellCount)
+            Rayfield:Notify({ Title = "💰 Auto Sell OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+SellTab:CreateSlider({
+    Name = "Sell Interval",
+    Range = {0.1, 5},
+    Increment = 0.1,
+    Suffix = "s",
+    CurrentValue = 1,
+    Flag = "SellInterval",
+    Callback = function(v) sellDelay = v end,
+})
+
+SellTab:CreateButton({
+    Name = "💰 Einmalig Sell",
+    Callback = function()
+        pcall(function() SellRemote:FireServer() end)
+        sellCount += 1
+        sellStatusLabel:Set("Status: Inaktiv | Total: " .. sellCount)
+        Rayfield:Notify({ Title = "💰 Sold!", Content = "Bricks verkauft!", Duration = 2 })
+    end,
+})
+
+-- ================================================
+-- TAB: BOOSTS
+-- ================================================
+local BoostRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("generateBoost")
+
+-- Correct configs based on SimpleSpy:
+-- BrickBoost: duration=600, multiplier=2
+-- Coins:      duration=600, multiplier=899100
+local boostConfigs = {
+    { name = "BrickBoost",  duration = 999999, multiplier = 999999 },
+    { name = "CoinBoost",   duration = 999999, multiplier = 999999 },
+    { name = "Coins",       duration = 999999, multiplier = 999999999 },
+    { name = "ExtraSpeed",  duration = 999999, multiplier = 999999 },
+    { name = "Levels",      duration = 999999, multiplier = 999999 },
+    { name = "SuperJump",   duration = 999999, multiplier = 999999 },
+    { name = "XPBoost",     duration = 999999, multiplier = 999999 },
 }
 
-game:GetService("ReplicatedStorage").Remotes.generateBoost:FireServer(unpack(args))
-wait()
+local boostThread = nil
+local BoostTab = Window:CreateTab("⚡ Boosts", 4483362458)
+BoostTab:CreateSection("All Boosts MAX")
+BoostTab:CreateLabel("Duration: 999999s | Multiplier: MAX")
+
+local boostStatusLabel = BoostTab:CreateLabel("Status: Inaktiv")
+
+local function fireAllBoosts()
+    for _, cfg in ipairs(boostConfigs) do
+        pcall(function()
+            BoostRemote:FireServer(cfg.name, cfg.duration, cfg.multiplier)
+        end)
+        task.wait(0.05)
+    end
 end
+
+BoostTab:CreateButton({
+    Name = "⚡ Alle Boosts einmalig aktivieren",
+    Callback = function()
+        fireAllBoosts()
+        Rayfield:Notify({ Title = "⚡ Boosts!", Content = "Alle Boosts aktiviert!", Duration = 3 })
+    end,
+})
+
+BoostTab:CreateToggle({
+    Name = "⚡ Auto Boost Loop (refresh alle 5s)",
+    CurrentValue = false,
+    Flag = "AutoBoost",
+    Callback = function(value)
+        if value then
+            if boostThread then return end
+            boostThread = task.spawn(function()
+                while value do
+                    fireAllBoosts()
+                    boostStatusLabel:Set("Status: ✅ AKTIV | Refreshed!")
+                    task.wait(5)
+                end
+                boostThread = nil
+                boostStatusLabel:Set("Status: Inaktiv")
+            end)
+            Rayfield:Notify({ Title = "⚡ Auto Boost ON", Content = "Refresht alle 5s!", Duration = 3 })
+        else
+            boostThread = nil
+            boostStatusLabel:Set("Status: Inaktiv")
+            Rayfield:Notify({ Title = "⚡ Auto Boost OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+BoostTab:CreateSection("💰 Infinite Coins")
+
+local coinThread = nil
+local coinCount = 0
+local coinStatusLabel = BoostTab:CreateLabel("Status: Inaktiv | Fired: 0")
+
+BoostTab:CreateToggle({
+    Name = "💰 Infinite Coins Loop",
+    CurrentValue = false,
+    Flag = "InfCoins",
+    Callback = function(value)
+        if value then
+            if coinThread then return end
+            coinThread = task.spawn(function()
+                while value do
+                    pcall(function()
+                        -- Exact format from SimpleSpy: type, duration, amount
+                        BoostRemote:FireServer("Coins", 600, 999999999)
+                    end)
+                    coinCount += 1
+                    coinStatusLabel:Set("Status: ✅ AKTIV | Fired: " .. coinCount)
+                    task.wait(0.1)
+                end
+                coinThread = nil
+                coinStatusLabel:Set("Status: Inaktiv | Total: " .. coinCount)
+            end)
+            Rayfield:Notify({ Title = "💰 Inf Coins ON", Content = "Coins werden gepumpt!", Duration = 3 })
+        else
+            coinThread = nil
+            coinStatusLabel:Set("Status: Inaktiv | Total: " .. coinCount)
+            Rayfield:Notify({ Title = "💰 Inf Coins OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+BoostTab:CreateButton({
+    Name = "💰 Einmalig MAX Coins",
+    Callback = function()
+        pcall(function()
+            BoostRemote:FireServer("Coins", 600, 999999999)
+        end)
+        Rayfield:Notify({ Title = "💰 Coins!", Content = "MAX Coins gefeuert!", Duration = 2 })
+    end,
+})
+
+BoostTab:CreateSection("Einzelne Boosts")
+
+for _, cfg in ipairs(boostConfigs) do
+    BoostTab:CreateButton({
+        Name = "⚡ " .. cfg.name,
+        Callback = function()
+            pcall(function()
+                BoostRemote:FireServer(cfg.name, cfg.duration, cfg.multiplier)
+            end)
+            Rayfield:Notify({ Title = "⚡ " .. cfg.name, Content = "Aktiviert!", Duration = 2 })
+        end,
+    })
+end
+
+-- ================================================
+-- TAB: INF LAUNCHER
+-- ================================================
+local LauncherTab = Window:CreateTab("🚀 Inf Launcher", 4483362458)
+LauncherTab:CreateSection("Launcher Stats MAX")
+LauncherTab:CreateLabel("Setzt Stats.Cooldown=0 direkt im ModuleScript")
+
+local launcherStatusLabel = LauncherTab:CreateLabel("Status: Inaktiv")
+local launcherThread = nil
+
+local function getLauncherStats()
+    -- Launcher can be in Backpack OR Character
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local char = LocalPlayer.Character
+    local launcher = (bp and bp:FindFirstChild("Launcher"))
+        or (char and char:FindFirstChild("Launcher"))
+    if not launcher then return nil end
+    return launcher:FindFirstChild("Stats")
+end
+
+local function applyInfStats()
+    local statsModule = getLauncherStats()
+    if not statsModule then return false end
+
+    pcall(function()
+        -- Require the module to get the table and modify it
+        local statsTable = require(statsModule)
+        if type(statsTable) == "table" then
+            statsTable.Cooldown    = 0
+            statsTable.BurstWait   = 0
+            statsTable.Bursts      = 100
+            statsTable.BlastRadius = 999999
+            statsTable.BlastForce  = 999999
+            statsTable.RocketSpeed = 999999
+            statsTable.ShotgunAmount = 100
+            statsTable.ShotgunSpread = 0
+            statsTable.Automatic   = true
+        end
+    end)
+    return true
+end
+
+LauncherTab:CreateButton({
+    Name = "🚀 INF Stats einmalig setzen",
+    Callback = function()
+        local ok = applyInfStats()
+        if ok then
+            Rayfield:Notify({ Title = "🚀 INF Launcher!", Content = "Cooldown=0, Bursts=100, Radius=MAX!", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "⚠️ Fehler", Content = "Launcher nicht gefunden! Equip deinen Launcher!", Duration = 3 })
+        end
+    end,
+})
+
+LauncherTab:CreateToggle({
+    Name = "🚀 Auto INF Launcher (Loop)",
+    CurrentValue = false,
+    Flag = "InfLauncher",
+    Callback = function(value)
+        if value then
+            if launcherThread then return end
+            launcherThread = task.spawn(function()
+                while value do
+                    local ok = applyInfStats()
+                    launcherStatusLabel:Set(ok and "Status: ✅ AKTIV | Cooldown=0" or "⚠️ Launcher nicht gefunden!")
+                    task.wait(0.1)
+                end
+                launcherThread = nil
+                launcherStatusLabel:Set("Status: Inaktiv")
+            end)
+            Rayfield:Notify({ Title = "🚀 Inf Launcher ON", Content = "Stats dauerhaft MAX!", Duration = 3 })
+        else
+            launcherThread = nil
+            launcherStatusLabel:Set("Status: Inaktiv")
+            Rayfield:Notify({ Title = "🚀 Inf Launcher OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+LauncherTab:CreateSection("Info")
+LauncherTab:CreateLabel("Cooldown = 0 | BurstWait = 0")
+LauncherTab:CreateLabel("Bursts = 100 | BlastRadius = MAX")
+LauncherTab:CreateLabel("RocketSpeed = MAX | Automatic = true")
+
+LauncherTab:CreateSection("💣 Bomb INF Stats")
+LauncherTab:CreateLabel("Setzt Bomb Stats.Cooldown=0 direkt")
+
+local bombStatusLabel = LauncherTab:CreateLabel("Status: Inaktiv")
+local bombThread = nil
+
+local function getBombStats()
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    local char = LocalPlayer.Character
+    local bomb = (bp and bp:FindFirstChild("Bomb"))
+        or (char and char:FindFirstChild("Bomb"))
+    if not bomb then return nil end
+    return bomb:FindFirstChild("Stats")
+end
+
+local function applyInfBomb()
+    local statsModule = getBombStats()
+    if not statsModule then return false end
+    pcall(function()
+        local statsTable = require(statsModule)
+        if type(statsTable) == "table" then
+            statsTable.Cooldown    = 0
+            statsTable.BlastRadius = 999999
+            statsTable.BlastForce  = 999999
+        end
+    end)
+    return true
+end
+
+LauncherTab:CreateButton({
+    Name = "💣 Bomb INF Stats einmalig",
+    Callback = function()
+        local ok = applyInfBomb()
+        if ok then
+            Rayfield:Notify({ Title = "💣 INF Bomb!", Content = "Cooldown=0, Radius=MAX!", Duration = 3 })
+        else
+            Rayfield:Notify({ Title = "⚠️ Fehler", Content = "Bomb nicht gefunden! Equip Bomb!", Duration = 3 })
+        end
+    end,
+})
+
+LauncherTab:CreateToggle({
+    Name = "💣 Auto INF Bomb (Loop)",
+    CurrentValue = false,
+    Flag = "InfBomb",
+    Callback = function(value)
+        if value then
+            if bombThread then return end
+            bombThread = task.spawn(function()
+                while value do
+                    local ok = applyInfBomb()
+                    bombStatusLabel:Set(ok and "Status: ✅ AKTIV | Cooldown=0" or "⚠️ Bomb nicht gefunden!")
+                    task.wait(0.1)
+                end
+                bombThread = nil
+                bombStatusLabel:Set("Status: Inaktiv")
+            end)
+            Rayfield:Notify({ Title = "💣 Inf Bomb ON", Content = "Bomb Stats dauerhaft MAX!", Duration = 3 })
+        else
+            bombThread = nil
+            bombStatusLabel:Set("Status: Inaktiv")
+            Rayfield:Notify({ Title = "💣 Inf Bomb OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+-- Auto apply when launcher equipped
+local function onChildAdded(child)
+    if child.Name == "Launcher" then
+        task.wait(0.3)
+        applyInfStats()
+        Rayfield:Notify({ Title = "🚀 Launcher equippt!", Content = "INF Stats gesetzt!", Duration = 2 })
+    end
+    if child.Name == "Bomb" then
+        task.wait(0.3)
+        applyInfBomb()
+        Rayfield:Notify({ Title = "💣 Bomb equippt!", Content = "INF Stats gesetzt!", Duration = 2 })
+    end
+end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char.ChildAdded:Connect(onChildAdded)
 end)
+if LocalPlayer.Character then
+    LocalPlayer.Character.ChildAdded:Connect(onChildAdded)
+end
+local bp = LocalPlayer:FindFirstChild("Backpack")
+if bp then bp.ChildAdded:Connect(onChildAdded) end
+
+-- ================================================
+-- STARTUP
+-- ================================================
+local launcher = getLauncher()
+Rayfield:Notify({
+    Title = "💥 Destruction Sim",
+    Content = launcher and "Launcher gefunden! Bereit!" or "⚠️ Kein Launcher — erst Launcher equippen!",
+    Duration = 4,
+})
