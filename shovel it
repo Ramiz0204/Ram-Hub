@@ -1,0 +1,1099 @@
+-- ================================================
+-- SNOW SHOVEL SIMULATOR - Auto Script
+-- ================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ================================================
+-- RAYFIELD
+-- ================================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "❄️ Snow Shovel",
+    LoadingTitle = "Snow Shovel Sim",
+    LoadingSubtitle = "Auto Script",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false,
+})
+
+-- ================================================
+-- CONFIG
+-- ================================================
+local Config = {
+    AutoTP     = false,
+    AutoSell   = false,
+    WaitTime   = 8,    -- seconds per ice block
+    SellDelay  = 2,
+    AreaName   = "Ice", -- Ice, Sidewalk, Road, Magma, etc.
+}
+
+local tpThread  = nil
+local sellThread = nil
+local totalTPs  = 0
+local totalSells = 0
+
+-- ================================================
+-- KNIT SELL SETUP
+-- ================================================
+local SellRemote    = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("SnowService"):WaitForChild("RF"):WaitForChild("SellSnow")
+local SellAllRemote = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"):WaitForChild("Services"):WaitForChild("ItemService"):WaitForChild("RF"):WaitForChild("SellAllItems")
+
+-- ================================================
+-- GET ICE BLOCKS
+-- ================================================
+local function getIceBlocks()
+    local blocks = {}
+    local snowFolder = Workspace:FindFirstChild("Snow")
+    if not snowFolder then return blocks end
+    local partsFolder = snowFolder:FindFirstChild("Parts")
+    if not partsFolder then return blocks end
+    local areaFolder = partsFolder:FindFirstChild(Config.AreaName)
+    if not areaFolder then return blocks end
+
+    for _, visualFolder in ipairs(areaFolder:GetChildren()) do
+        for _, idFolder in ipairs(visualFolder:GetChildren()) do
+            local id = tonumber(idFolder.Name)
+            if id then
+                -- Get position from Visual child
+                local visual = idFolder:FindFirstChild("Visual")
+                local pos = nil
+                if visual then
+                    if visual:IsA("BasePart") then
+                        pos = visual.Position
+                    else
+                        local bp = visual:FindFirstChildOfClass("BasePart")
+                        if bp then pos = bp.Position end
+                    end
+                end
+                if not pos then
+                    local bp = idFolder:FindFirstChildOfClass("BasePart")
+                    if bp then pos = bp.Position end
+                end
+                if pos then
+                    table.insert(blocks, { id = id, folder = idFolder, pos = pos })
+                end
+            end
+        end
+    end
+    return blocks
+end
+
+-- ================================================
+-- TAB: AUTO TP ICE
+-- ================================================
+local TpIceTab = Window:CreateTab("🧊 Auto TP Ice", 4483362458)
+TpIceTab:CreateSection("Auto TP zu Ice Blocks")
+TpIceTab:CreateLabel("Teleportiert zu Ice Blocks, wartet dann weiter")
+
+local tpStatusLabel  = TpIceTab:CreateLabel("Status: Inaktiv")
+local tpBlockLabel   = TpIceTab:CreateLabel("Block: -")
+local tpCountLabel   = TpIceTab:CreateLabel("TPs: 0 | Blocks gefunden: 0")
+local tpTimerLabel   = TpIceTab:CreateLabel("Timer: -")
+
+TpIceTab:CreateToggle({
+    Name = "🧊 Auto TP AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoTP",
+    Callback = function(value)
+        Config.AutoTP = value
+        if value then
+            if tpThread then return end
+            tpThread = task.spawn(function()
+                local visitedBlocks = {}
+                local loopCount = 0
+
+                while Config.AutoTP do
+                    local blocks = getIceBlocks()
+                    tpCountLabel:Set("TPs: " .. totalTPs .. " | Blocks: " .. #blocks)
+
+                    if #blocks == 0 then
+                        tpStatusLabel:Set("⏳ Keine Ice Blocks gefunden!")
+                        task.wait(2)
+                        continue
+                    end
+
+                    -- Find next unvisited block
+                    local block = nil
+                    for _, b in ipairs(blocks) do
+                        if not visitedBlocks[b.id] then
+                            block = b
+                            break
+                        end
+                    end
+
+                    -- All visited → reset and loop again
+                    if not block then
+                        loopCount += 1
+                        visitedBlocks = {}
+                        tpStatusLabel:Set("🔄 Loop #" .. loopCount .. " | Alle Blocks fertig, starte neu!")
+                        task.wait(0.5)
+                        block = blocks[1]
+                    end
+
+                    if block then
+                        visitedBlocks[block.id] = true
+
+                        local char = LocalPlayer.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+                        if hrp and block.pos then
+                            hrp.CFrame = CFrame.new(block.pos + Vector3.new(0, 3, 0))
+                            totalTPs += 1
+
+                            local visited = 0
+                            for _ in pairs(visitedBlocks) do visited += 1 end
+                            tpCountLabel:Set("TPs: " .. totalTPs .. " | " .. visited .. "/" .. #blocks .. " besucht")
+                            tpBlockLabel:Set("Block ID: " .. block.id .. " | Loop #" .. loopCount)
+                            tpStatusLabel:Set("✅ AKTIV | " .. visited .. "/" .. #blocks)
+
+                            for i = Config.WaitTime, 1, -1 do
+                                if not Config.AutoTP then break end
+                                tpTimerLabel:Set("⏱️ Nächster Block in: " .. i .. "s")
+                                char = LocalPlayer.Character
+                                hrp = char and char:FindFirstChild("HumanoidRootPart")
+                                if hrp then
+                                    hrp.CFrame = CFrame.new(block.pos + Vector3.new(0, 3, 0))
+                                end
+                                task.wait(1)
+                            end
+                        else
+                            task.wait(0.5)
+                        end
+                    end
+                end
+                tpThread = nil
+                tpStatusLabel:Set("Status: Inaktiv")
+                tpTimerLabel:Set("Timer: -")
+            end)
+            Rayfield:Notify({ Title = "🧊 Auto TP ON", Content = "Teleportiert zu " .. Config.AreaName .. " Blocks!", Duration = 3 })
+        else
+            tpThread = nil
+            tpStatusLabel:Set("Status: Inaktiv")
+            tpTimerLabel:Set("Timer: -")
+            Rayfield:Notify({ Title = "🧊 Auto TP OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+TpIceTab:CreateSlider({
+    Name = "Wartezeit pro Block",
+    Range = {1, 30},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = 8,
+    Flag = "WaitTime",
+    Callback = function(v) Config.WaitTime = v end,
+})
+
+TpIceTab:CreateSection("Area wählen")
+
+for _, area in ipairs({"Ice", "Sidewalk", "Road", "Magma", "Construction", "Farmland"}) do
+    TpIceTab:CreateButton({
+        Name = "📍 " .. area,
+        Callback = function()
+            Config.AreaName = area
+            Rayfield:Notify({ Title = "📍 Area", Content = "Farme jetzt: " .. area, Duration = 2 })
+        end,
+    })
+end
+
+TpIceTab:CreateButton({
+    Name = "🔄 Block Counter Reset",
+    Callback = function()
+        totalTPs = 0
+        tpCountLabel:Set("TPs: 0 | Blocks: 0")
+        Rayfield:Notify({ Title = "✅ Reset", Content = "Counter zurückgesetzt!", Duration = 2 })
+    end,
+})
+
+-- ================================================
+-- TAB: TELEPORT
+-- ================================================
+local TpTab = Window:CreateTab("🚀 Teleport", 4483362458)
+TpTab:CreateSection("Map Teleports")
+
+local function tpTo(x, y, z)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = CFrame.new(x, y, z)
+        Rayfield:Notify({ Title = "🚀 Teleport", Content = string.format("%.1f, %.1f, %.1f", x, y, z), Duration = 2 })
+    end
+end
+
+TpTab:CreateButton({ Name = "🟢 Spawn",            Callback = function() tpTo(197.837585, 6.21372604, 88.3297272) end })
+TpTab:CreateButton({ Name = "🪣 Shovel Shop",       Callback = function() tpTo(116.020508, 0.0357167721, 89.3820648) end })
+TpTab:CreateButton({ Name = "🛒 Mobile Shop",       Callback = function() tpTo(127.499992, 0, -50.8799973) end })
+TpTab:CreateButton({ Name = "⭕ Middle",             Callback = function() tpTo(16.6895428, 6.13402271, -3.253438) end })
+TpTab:CreateButton({ Name = "⚙️ Gear Shop",         Callback = function() tpTo(211.183441, 0.194864035, -57.0138206) end })
+TpTab:CreateButton({ Name = "✨ Blessings Shop",    Callback = function() tpTo(178.516541, 0.419632256, 82.1480103) end })
+TpTab:CreateButton({ Name = "🌋 Magma Area",        Callback = function() tpTo(792.5, -7.98999977, 0) end })
+TpTab:CreateButton({ Name = "🏗️ Construction Area", Callback = function() tpTo(111.944687, -0.728326082, 312.151886) end })
+
+-- ================================================
+-- TAB: AUTO SELL
+-- ================================================
+local SellTab = Window:CreateTab("💰 Auto Sell", 4483362458)
+SellTab:CreateSection("Auto Sell Snow")
+
+local sellStatusLabel = SellTab:CreateLabel("Status: Inaktiv | Sold: 0")
+
+SellTab:CreateToggle({
+    Name = "💰 Auto Sell Snow",
+    CurrentValue = false,
+    Flag = "AutoSell",
+    Callback = function(value)
+        Config.AutoSell = value
+        if value then
+            if sellThread then return end
+            sellThread = task.spawn(function()
+                while Config.AutoSell do
+                    pcall(function() SellRemote:InvokeServer() end)
+                    pcall(function() SellAllRemote:InvokeServer() end)
+                    totalSells += 1
+                    sellStatusLabel:Set("Status: ✅ AKTIV | Sold: " .. totalSells)
+                    task.wait(Config.SellDelay)
+                end
+                sellThread = nil
+                sellStatusLabel:Set("Status: Inaktiv | Total: " .. totalSells)
+            end)
+            Rayfield:Notify({ Title = "💰 Auto Sell ON", Content = "Verkauft alle " .. Config.SellDelay .. "s!", Duration = 3 })
+        else
+            sellThread = nil
+            sellStatusLabel:Set("Status: Inaktiv | Total: " .. totalSells)
+            Rayfield:Notify({ Title = "💰 Auto Sell OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+SellTab:CreateSlider({
+    Name = "Sell Interval",
+    Range = {0.5, 10},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = 2,
+    Flag = "SellInterval",
+    Callback = function(v) Config.SellDelay = v end,
+})
+
+SellTab:CreateButton({
+    Name = "💰 Einmalig Sell",
+    Callback = function()
+        pcall(function() SellRemote:InvokeServer() end)
+        pcall(function() SellAllRemote:InvokeServer() end)
+        Rayfield:Notify({ Title = "💰 Sold!", Content = "Snow verkauft!", Duration = 2 })
+    end,
+})
+
+-- ================================================
+-- TAB: MISC (Universal)
+-- ================================================
+local MiscTab = Window:CreateTab("⚙️ Misc", 4483362458)
+
+-- ANTI AFK
+MiscTab:CreateSection("🛡️ Anti AFK")
+
+local antiAfkConn = nil
+local antiAfkThread = nil
+
+local function startAntiAfk()
+    -- Method 1: Disconnect Idled event
+    antiAfkConn = LocalPlayer.Idled:Connect(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        pcall(function()
+            VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+            task.wait(0.1)
+            VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        end)
+    end)
+    -- Method 2: Simulate input every 15 seconds
+    antiAfkThread = task.spawn(function()
+        while antiAfkConn do
+            task.wait(15)
+            if not antiAfkConn then break end
+            local VirtualUser = game:GetService("VirtualUser")
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+            end)
+            -- Also simulate walk
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                pcall(function()
+                    hum:Move(Vector3.new(1,0,0))
+                    task.wait(0.1)
+                    hum:Move(Vector3.new(0,0,0))
+                end)
+            end
+        end
+    end)
+end
+
+MiscTab:CreateToggle({
+    Name = "🛡️ Anti AFK (auto AN)",
+    CurrentValue = true,
+    Flag = "AntiAFK",
+    Callback = function(value)
+        if value then
+            startAntiAfk()
+            Rayfield:Notify({ Title = "🛡️ Anti AFK ON", Content = "Wirst nicht gekickt! Input alle 15s", Duration = 3 })
+        else
+            if antiAfkConn then antiAfkConn:Disconnect() antiAfkConn = nil end
+            antiAfkThread = nil
+            Rayfield:Notify({ Title = "🛡️ Anti AFK OFF", Content = "Deaktiviert.", Duration = 2 })
+        end
+    end,
+})
+
+-- SPEED & JUMP
+MiscTab:CreateSection("🏃 Movement")
+
+MiscTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 150},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = 16,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = v end
+    end,
+})
+
+MiscTab:CreateSlider({
+    Name = "Jump Power",
+    Range = {50, 300},
+    Increment = 5,
+    Suffix = "",
+    CurrentValue = 50,
+    Flag = "JumpPower",
+    Callback = function(v)
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.JumpPower = v end
+    end,
+})
+
+MiscTab:CreateButton({
+    Name = "🔄 Reset Movement",
+    Callback = function()
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = 16 hum.JumpPower = 50 end
+        Rayfield:Notify({ Title = "✅", Content = "Speed & Jump zurückgesetzt!", Duration = 2 })
+    end,
+})
+
+-- GAME CONTROLS
+MiscTab:CreateSection("🎮 Game")
+
+MiscTab:CreateButton({
+    Name = "🔄 Rejoin",
+    Callback = function()
+        Rayfield:Notify({ Title = "🔄 Rejoin...", Content = "Verbinde neu...", Duration = 2 })
+        task.wait(1)
+        pcall(function()
+            game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end,
+})
+
+MiscTab:CreateButton({
+    Name = "📋 UserID kopieren",
+    Callback = function()
+        pcall(function() setclipboard(tostring(LocalPlayer.UserId)) end)
+        Rayfield:Notify({ Title = "📋 Kopiert!", Content = "UserID: " .. LocalPlayer.UserId, Duration = 3 })
+    end,
+})
+
+MiscTab:CreateButton({
+    Name = "📋 Game ID kopieren",
+    Callback = function()
+        pcall(function() setclipboard(tostring(game.PlaceId)) end)
+        Rayfield:Notify({ Title = "📋 Kopiert!", Content = "PlaceId: " .. game.PlaceId, Duration = 3 })
+    end,
+})
+
+MiscTab:CreateButton({
+    Name = "🔭 Zoom Max",
+    Callback = function()
+        LocalPlayer.CameraMaxZoomDistance = 500
+        Rayfield:Notify({ Title = "🔭", Content = "Max Zoom auf 500!", Duration = 2 })
+    end,
+})
+
+MiscTab:CreateToggle({
+    Name = "🌙 No Fog / Full Bright",
+    CurrentValue = false,
+    Flag = "FullBright",
+    Callback = function(value)
+        local lighting = game:GetService("Lighting")
+        if value then
+            lighting.FogEnd = 1000000
+            lighting.FogStart = 1000000
+            lighting.Brightness = 5
+            lighting.ClockTime = 14
+            Rayfield:Notify({ Title = "🌙 Full Bright ON", Content = "Kein Fog!", Duration = 2 })
+        else
+            lighting.FogEnd = 100000
+            lighting.Brightness = 1
+            Rayfield:Notify({ Title = "🌙 Full Bright OFF", Content = "Normal.", Duration = 2 })
+        end
+    end,
+})
+
+-- INF JUMP
+MiscTab:CreateSection("🎮 Special")
+
+local infJumpConn = nil
+MiscTab:CreateToggle({
+    Name = "🎮 Infinite Jump",
+    CurrentValue = false,
+    Flag = "InfJump",
+    Callback = function(value)
+        if value then
+            infJumpConn = game:GetService("UserInputService").JumpRequest:Connect(function()
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+            end)
+            Rayfield:Notify({ Title = "🎮 Inf Jump ON", Content = "Springst immer!", Duration = 2 })
+        else
+            if infJumpConn then infJumpConn:Disconnect() infJumpConn = nil end
+            Rayfield:Notify({ Title = "🎮 Inf Jump OFF", Content = "Deaktiviert.", Duration = 2 })
+        end
+    end,
+})
+
+-- ESP
+local espBillboards = {}
+local espThread = nil
+
+local function removeESP()
+    for _, bb in pairs(espBillboards) do
+        pcall(function() bb:Destroy() end)
+    end
+    espBillboards = {}
+end
+
+local function updateESP()
+    removeESP()
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        if player == LocalPlayer then continue end
+        local char = player.Character
+        if not char then continue end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then continue end
+
+        -- Billboard
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.new(0, 100, 0, 40)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent = hrp
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.TextColor3 = Color3.fromRGB(255, 80, 80)
+        label.TextStrokeTransparency = 0
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 14
+        label.Text = player.Name
+        label.Parent = bb
+
+        -- Distance label
+        local distLabel = Instance.new("TextLabel")
+        distLabel.Size = UDim2.new(1, 0, 0.5, 0)
+        distLabel.Position = UDim2.new(0, 0, 0.5, 0)
+        distLabel.BackgroundTransparency = 1
+        distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        distLabel.TextStrokeTransparency = 0
+        distLabel.Font = Enum.Font.Gotham
+        distLabel.TextSize = 11
+        distLabel.Text = "..."
+        distLabel.Parent = bb
+
+        espBillboards[player.Name] = bb
+
+        -- Live distance update
+        task.spawn(function()
+            while bb and bb.Parent do
+                local myChar = LocalPlayer.Character
+                local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if myHRP and hrp and hrp.Parent then
+                    local dist = math.floor((hrp.Position - myHRP.Position).Magnitude)
+                    distLabel.Text = dist .. " studs"
+                    -- Color by distance
+                    if dist < 50 then
+                        label.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    elseif dist < 150 then
+                        label.TextColor3 = Color3.fromRGB(255, 165, 0)
+                    else
+                        label.TextColor3 = Color3.fromRGB(80, 255, 80)
+                    end
+                end
+                task.wait(0.5)
+            end
+        end)
+    end
+end
+
+MiscTab:CreateToggle({
+    Name = "🔭 Player ESP",
+    CurrentValue = false,
+    Flag = "PlayerESP",
+    Callback = function(value)
+        if value then
+            updateESP()
+            espThread = task.spawn(function()
+                while value do
+                    task.wait(3)
+                    if value then updateESP() end
+                end
+            end)
+            game:GetService("Players").PlayerAdded:Connect(function() if value then task.wait(1) updateESP() end end)
+            game:GetService("Players").PlayerRemoving:Connect(function(p)
+                if espBillboards[p.Name] then
+                    pcall(function() espBillboards[p.Name]:Destroy() end)
+                    espBillboards[p.Name] = nil
+                end
+            end)
+            Rayfield:Notify({ Title = "🔭 ESP ON", Content = "Spieler sichtbar!", Duration = 2 })
+        else
+            espThread = nil
+            removeESP()
+            Rayfield:Notify({ Title = "🔭 ESP OFF", Content = "Entfernt.", Duration = 2 })
+        end
+    end,
+})
+
+-- RAINBOW NAME
+local rainbowThread = nil
+MiscTab:CreateToggle({
+    Name = "🌈 Rainbow Name",
+    CurrentValue = false,
+    Flag = "RainbowName",
+    Callback = function(value)
+        if value then
+            rainbowThread = task.spawn(function()
+                local hue = 0
+                while value do
+                    hue = (hue + 1) % 360
+                    local color = Color3.fromHSV(hue/360, 1, 1)
+                    -- Change name color in overhead display
+                    local char = LocalPlayer.Character
+                    if char then
+                        local humanoidDesc = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        if humanoidDesc then
+                            pcall(function()
+                                local nameTag = char:FindFirstChild(LocalPlayer.Name)
+                                    or char:FindFirstChildOfClass("BillboardGui")
+                                if nameTag then
+                                    local lbl = nameTag:FindFirstChildOfClass("TextLabel")
+                                    if lbl then lbl.TextColor3 = color end
+                                end
+                            end)
+                        end
+                    end
+                    -- Also change chat color via DisplayName trick
+                    task.wait(0.05)
+                end
+            end)
+            Rayfield:Notify({ Title = "🌈 Rainbow Name ON", Content = "Regenbogen!", Duration = 2 })
+        else
+            rainbowThread = nil
+            Rayfield:Notify({ Title = "🌈 Rainbow Name OFF", Content = "Deaktiviert.", Duration = 2 })
+        end
+    end,
+})
+
+-- HIDE GUI
+MiscTab:CreateToggle({
+    Name = "📸 Hide GUI (Screenshot Modus)",
+    CurrentValue = false,
+    Flag = "HideGUI",
+    Callback = function(value)
+        for _, gui in ipairs(LocalPlayer.PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") or gui:IsA("BillboardGui") then
+                pcall(function() gui.Enabled = not value end)
+            end
+        end
+        -- Also hide CoreGui
+        local StarterGui = game:GetService("StarterGui")
+        pcall(function()
+            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, not value)
+        end)
+        Rayfield:Notify({
+            Title = value and "📸 GUI Hidden!" or "📸 GUI sichtbar",
+            Content = value and "Perfekt für Screenshots!" or "Alles wieder sichtbar.",
+            Duration = 2,
+        })
+    end,
+})
+
+-- Auto start anti afk
+task.spawn(function()
+    task.wait(0.5)
+    startAntiAfk()
+end)
+
+-- ================================================
+-- TAB: PLAYERS
+-- ================================================
+local PlayersTab = Window:CreateTab("👥 Players", 4483362458)
+
+-- TELEPORT TO PLAYER
+PlayersTab:CreateSection("🚀 Teleport zu Spieler")
+
+local function getPlayerList()
+    local list = {}
+    for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(list, p.Name)
+        end
+    end
+    return list
+end
+
+local playerLabel = PlayersTab:CreateLabel("Spieler: " .. (#game:GetService("Players"):GetPlayers() - 1) .. " online")
+
+PlayersTab:CreateInput({
+    Name = "Spieler Name eingeben",
+    PlaceholderText = "z.B. Player123",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(name)
+        local target = game:GetService("Players"):FindFirstChild(name)
+        if not target or not target.Character then
+            Rayfield:Notify({ Title = "⚠️ Nicht gefunden", Content = name .. " nicht im Server!", Duration = 3 })
+            return
+        end
+        local hrp = target.Character:FindFirstChild("HumanoidRootPart")
+        local myChar = LocalPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if hrp and myHRP then
+            myHRP.CFrame = hrp.CFrame * CFrame.new(3, 0, 0)
+            Rayfield:Notify({ Title = "🚀 TP!", Content = "Zu " .. name .. " teleportiert!", Duration = 2 })
+        end
+    end,
+})
+
+PlayersTab:CreateButton({
+    Name = "🔄 Spielerliste aktualisieren",
+    Callback = function()
+        local players = getPlayerList()
+        local names = table.concat(players, ", ")
+        playerLabel:Set("Online: " .. #players .. " | " .. (names ~= "" and names or "Niemand"))
+        Rayfield:Notify({ Title = "👥 Spieler", Content = #players .. " Spieler online", Duration = 3 })
+    end,
+})
+
+-- Live player counter
+task.spawn(function()
+    while true do
+        task.wait(5)
+        local count = #game:GetService("Players"):GetPlayers() - 1
+        playerLabel:Set("Spieler: " .. count .. " online")
+    end
+end)
+
+-- CHAT SPY
+PlayersTab:CreateSection("💬 Chat Spy")
+PlayersTab:CreateLabel("Zeigt alle Chats in Notifications")
+
+local chatSpyConn = nil
+local chatLog = {}
+
+PlayersTab:CreateToggle({
+    Name = "💬 Chat Spy AN/AUS",
+    CurrentValue = false,
+    Flag = "ChatSpy",
+    Callback = function(value)
+        if value then
+            chatSpyConn = game:GetService("Players").PlayerAdded:Connect(function() end)
+            -- Hook all players chats
+            local function hookPlayer(player)
+                player.Chatted:Connect(function(msg)
+                    if not value then return end
+                    table.insert(chatLog, player.Name .. ": " .. msg)
+                    Rayfield:Notify({
+                        Title = "💬 " .. player.Name,
+                        Content = msg,
+                        Duration = 5,
+                    })
+                    print("[ChatSpy] " .. player.Name .. ": " .. msg)
+                end)
+            end
+            for _, p in ipairs(game:GetService("Players"):GetPlayers()) do
+                if p ~= LocalPlayer then hookPlayer(p) end
+            end
+            game:GetService("Players").PlayerAdded:Connect(function(p)
+                if value then hookPlayer(p) end
+            end)
+            Rayfield:Notify({ Title = "💬 Chat Spy ON", Content = "Alle Chats werden angezeigt!", Duration = 3 })
+        else
+            if chatSpyConn then chatSpyConn:Disconnect() chatSpyConn = nil end
+            Rayfield:Notify({ Title = "💬 Chat Spy OFF", Content = "Deaktiviert.", Duration = 2 })
+        end
+    end,
+})
+
+PlayersTab:CreateButton({
+    Name = "📋 Chat Log kopieren",
+    Callback = function()
+        local log = table.concat(chatLog, "\n")
+        pcall(function() setclipboard(log) end)
+        Rayfield:Notify({ Title = "📋 Kopiert!", Content = #chatLog .. " Nachrichten kopiert!", Duration = 3 })
+    end,
+})
+
+-- ================================================
+-- TAB: SHOPS
+-- ================================================
+local ShopsTab = Window:CreateTab("🛍️ Shops", 4483362458)
+ShopsTab:CreateSection("Shop Öffnen")
+ShopsTab:CreateLabel("Öffnet Shops via PlayerGui.Menu.Shops")
+
+local function openShopGui(shopName)
+    local ok, shop = pcall(function()
+        return LocalPlayer.PlayerGui.Menu[shopName]
+    end)
+    if not ok or not shop then
+        Rayfield:Notify({ Title = "⚠️", Content = shopName .. " nicht gefunden!", Duration = 3 })
+        return
+    end
+    pcall(function() shop.Visible = true end)
+    Rayfield:Notify({ Title = "🛍️ " .. shopName, Content = "Shop geöffnet!", Duration = 2 })
+end
+
+local function clickOpenShop()
+    -- Click OpenShop button in BillboardGuis
+    for _, bb in ipairs(LocalPlayer.PlayerGui:GetChildren()) do
+        if bb:IsA("BillboardGui") then
+            local btn = bb:FindFirstChild("OpenShop")
+            if btn then
+                pcall(function() btn:activate() end)
+                pcall(function() fireclickdetector(btn) end)
+            end
+        end
+    end
+end
+
+ShopsTab:CreateButton({
+    Name = "⚙️ Gears Shop",
+    Callback = function() openShopGui("GearsShop") end,
+})
+ShopsTab:CreateButton({
+    Name = "🪣 Shovels Shop",
+    Callback = function() openShopGui("ShovelsShop") end,
+})
+ShopsTab:CreateButton({
+    Name = "✨ Blessings Shop",
+    Callback = function() openShopGui("BlessingsShop") end,
+})
+ShopsTab:CreateButton({
+    Name = "🚗 Vehicles Shop",
+    Callback = function() openShopGui("VehiclesShop") end,
+})
+
+ShopsTab:CreateSection("Billboard Buttons")
+ShopsTab:CreateButton({
+    Name = "🖱️ OpenShop Buttons klicken",
+    Callback = function()
+        clickOpenShop()
+        Rayfield:Notify({ Title = "🖱️ Geklickt!", Content = "Alle OpenShop Buttons aktiviert!", Duration = 2 })
+    end,
+})
+
+ShopsTab:CreateSection("⚡ Auto Gear Sniper")
+ShopsTab:CreateLabel("Kauft alle neuen Gear Shop Items alle 5min")
+
+local gearThread = nil
+local gearCount = 0
+local gearStatusLabel = ShopsTab:CreateLabel("Status: Inaktiv | Gekauft: 0")
+local GearPurchaseRemote = ReplicatedStorage
+    :WaitForChild("Packages")
+    :WaitForChild("Knit")
+    :WaitForChild("Services")
+    :WaitForChild("GearsShopService")
+    :WaitForChild("RF")
+    :WaitForChild("Purchase")
+
+local function buyAllGearItems()
+    local bought = 0
+    -- Try IDs 1-20 (all possible gear slots)
+    for id = 1, 20 do
+        local ok, result = pcall(function()
+            return GearPurchaseRemote:InvokeServer(id)
+        end)
+        if ok and result then
+            bought += 1
+            gearCount += 1
+        end
+        task.wait(0.2)
+    end
+    return bought
+end
+
+ShopsTab:CreateToggle({
+    Name = "⚡ Auto Gear Sniper AN/AUS",
+    CurrentValue = false,
+    Flag = "AutoGear",
+    Callback = function(value)
+        if value then
+            if gearThread then return end
+            -- Buy immediately on start
+            task.spawn(function()
+                local bought = buyAllGearItems()
+                gearStatusLabel:Set("✅ AKTIV | Gekauft: " .. gearCount .. " (+" .. bought .. ")")
+            end)
+            gearThread = task.spawn(function()
+                while value do
+                    -- Wait 5 minutes then buy again
+                    for i = 300, 1, -1 do
+                        if not value then break end
+                        gearStatusLabel:Set("⏱️ Nächster Snipe in: " .. i .. "s | Total: " .. gearCount)
+                        task.wait(1)
+                    end
+                    if value then
+                        local bought = buyAllGearItems()
+                        gearStatusLabel:Set("✅ Gesniped! +" .. bought .. " | Total: " .. gearCount)
+                        Rayfield:Notify({
+                            Title = "⚡ Gear Sniper!",
+                            Content = "+" .. bought .. " neue Items gekauft!",
+                            Duration = 3,
+                        })
+                    end
+                end
+                gearThread = nil
+            end)
+            Rayfield:Notify({ Title = "⚡ Gear Sniper ON", Content = "Kauft alle 5min neue Gear Items!", Duration = 3 })
+        else
+            gearThread = nil
+            gearStatusLabel:Set("Status: Inaktiv | Total: " .. gearCount)
+            Rayfield:Notify({ Title = "⚡ Gear Sniper OFF", Content = "Gestoppt.", Duration = 2 })
+        end
+    end,
+})
+
+ShopsTab:CreateButton({
+    Name = "⚡ Einmalig alle Gear Items kaufen",
+    Callback = function()
+        task.spawn(function()
+            gearStatusLabel:Set("⏳ Kaufe alle Items...")
+            local bought = buyAllGearItems()
+            gearStatusLabel:Set("✅ Fertig! +" .. bought .. " | Total: " .. gearCount)
+            Rayfield:Notify({ Title = "⚡ Gekauft!", Content = bought .. " Gear Items gekauft!", Duration = 3 })
+        end)
+    end,
+})
+    Callback = function()
+        local shopNames = {"GearsShop", "ShovelsShop", "BlessingsShop", "VehiclesShop", "RobuxShop"}
+        for _, name in ipairs(shopNames) do
+            pcall(function()
+                LocalPlayer.PlayerGui.Menu[name].Visible = false
+            end)
+        end
+        Rayfield:Notify({ Title = "❌", Content = "Alle Shops geschlossen!", Duration = 2 })
+    end,
+})
+local ServerTab = Window:CreateTab("🌐 Server", 4483362458)
+
+-- PING & FPS
+ServerTab:CreateSection("📊 Stats")
+
+local pingLabel = ServerTab:CreateLabel("Ping: -ms | FPS: -")
+local statsThread = nil
+
+ServerTab:CreateToggle({
+    Name = "📊 Live Stats AN/AUS",
+    CurrentValue = true,
+    Flag = "LiveStats",
+    Callback = function(value)
+        if value then
+            if statsThread then return end
+            statsThread = task.spawn(function()
+                while value do
+                    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+                    local fps = math.floor(1 / game:GetService("RunService").Heartbeat:Wait())
+                    pingLabel:Set(string.format("Ping: %dms | FPS: %d", ping, fps))
+                    task.wait(1)
+                end
+                statsThread = nil
+            end)
+        else
+            statsThread = nil
+        end
+    end,
+})
+
+-- FPS BOOST
+ServerTab:CreateSection("⚡ FPS Boost")
+
+ServerTab:CreateToggle({
+    Name = "⚡ FPS Boost",
+    CurrentValue = false,
+    Flag = "FPSBoost",
+    Callback = function(value)
+        if value then
+            -- Remove unnecessary rendering
+            local lighting = game:GetService("Lighting")
+            pcall(function()
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+            end)
+            -- Disable shadows and effects
+            for _, obj in ipairs(lighting:GetChildren()) do
+                if obj:IsA("BlurEffect") or obj:IsA("SunRaysEffect")
+                or obj:IsA("ColorCorrectionEffect") or obj:IsA("DepthOfFieldEffect") then
+                    obj.Enabled = false
+                end
+            end
+            -- Reduce render distance
+            workspace.StreamingEnabled = false
+            Rayfield:Notify({ Title = "⚡ FPS Boost ON", Content = "Qualität reduziert für mehr FPS!", Duration = 3 })
+        else
+            pcall(function()
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+            end)
+            Rayfield:Notify({ Title = "⚡ FPS Boost OFF", Content = "Normal.", Duration = 2 })
+        end
+    end,
+})
+
+-- AUTO REJOIN
+ServerTab:CreateSection("🔄 Auto Rejoin")
+
+local kickConn = nil
+ServerTab:CreateToggle({
+    Name = "🔄 Auto Rejoin bei Kick",
+    CurrentValue = false,
+    Flag = "AutoRejoin",
+    Callback = function(value)
+        if value then
+            kickConn = game:GetService("Players").LocalPlayer.OnTeleport:Connect(function(state)
+                if state == Enum.TeleportState.RequestedFromServer then
+                    task.wait(3)
+                    game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
+                end
+            end)
+            -- Also watch for kick
+            game:GetService("Players").LocalPlayer.AncestryChanged:Connect(function()
+                if not LocalPlayer.Parent then
+                    task.wait(2)
+                    pcall(function()
+                        game:GetService("TeleportService"):Teleport(game.PlaceId)
+                    end)
+                end
+            end)
+            Rayfield:Notify({ Title = "🔄 Auto Rejoin ON", Content = "Rejoined automatisch bei Kick!", Duration = 3 })
+        else
+            if kickConn then kickConn:Disconnect() kickConn = nil end
+            Rayfield:Notify({ Title = "🔄 Auto Rejoin OFF", Content = "Deaktiviert.", Duration = 2 })
+        end
+    end,
+})
+
+-- SERVER HOP
+ServerTab:CreateSection("🌐 Server Hop")
+ServerTab:CreateLabel("Sucht Server mit weniger Spielern")
+
+ServerTab:CreateButton({
+    Name = "🌐 Server Hop (weniger Spieler)",
+    Callback = function()
+        Rayfield:Notify({ Title = "🌐 Server Hop...", Content = "Suche besseren Server...", Duration = 3 })
+        task.spawn(function()
+            local HttpService = game:GetService("HttpService")
+            local TeleportService = game:GetService("TeleportService")
+            local placeId = game.PlaceId
+            local currentPlayers = #game:GetService("Players"):GetPlayers()
+            local bestServer = nil
+            local bestCount = currentPlayers
+
+            local ok, result = pcall(function()
+                return HttpService:JSONDecode(
+                    game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100")
+                )
+            end)
+
+            if ok and result and result.data then
+                for _, server in ipairs(result.data) do
+                    if server.id ~= game.JobId and server.playing < bestCount then
+                        bestCount = server.playing
+                        bestServer = server.id
+                    end
+                end
+            end
+
+            if bestServer then
+                Rayfield:Notify({ Title = "🌐 Server gefunden!", Content = "Hoppe zu Server mit " .. bestCount .. " Spielern!", Duration = 3 })
+                task.wait(2)
+                pcall(function()
+                    TeleportService:TeleportToPlaceInstance(placeId, bestServer, LocalPlayer)
+                end)
+            else
+                Rayfield:Notify({ Title = "⚠️ Kein besserer Server", Content = "Du bist bereits auf dem besten Server!", Duration = 3 })
+            end
+        end)
+    end,
+})
+
+ServerTab:CreateButton({
+    Name = "🌐 Random Server Hop",
+    Callback = function()
+        task.spawn(function()
+            local HttpService = game:GetService("HttpService")
+            local TeleportService = game:GetService("TeleportService")
+            local placeId = game.PlaceId
+
+            local ok, result = pcall(function()
+                return HttpService:JSONDecode(
+                    game:HttpGet("https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100")
+                )
+            end)
+
+            if ok and result and result.data and #result.data > 0 then
+                local servers = result.data
+                local randomServer = servers[math.random(1, #servers)]
+                if randomServer.id ~= game.JobId then
+                    Rayfield:Notify({ Title = "🎲 Random Hop!", Content = "Hoppe zu zufälligem Server!", Duration = 2 })
+                    task.wait(2)
+                    pcall(function()
+                        TeleportService:TeleportToPlaceInstance(placeId, randomServer.id, LocalPlayer)
+                    end)
+                end
+            end
+        end)
+    end,
+})
+
+ShopsTab:CreateButton({
+    Name = "❌ Alle Shops schließen",
+    Callback = function()
+        local shopNames = {"GearsShop", "ShovelsShop", "BlessingsShop", "VehiclesShop", "RobuxShop"}
+        for _, name in ipairs(shopNames) do
+            pcall(function() LocalPlayer.PlayerGui.Menu[name].Visible = false end)
+        end
+        Rayfield:Notify({ Title = "❌", Content = "Alle Shops geschlossen!", Duration = 2 })
+    end,
+})
+
+-- ================================================
+-- STARTUP
+-- ================================================
+local blocks = getIceParts()
+Rayfield:Notify({
+    Title = "❄️ Snow Shovel",
+    Content = "Bereit! " .. #blocks .. " Ice Blocks | Anti AFK AN 🛡️",
+    Duration = 4,
+})
