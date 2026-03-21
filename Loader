@@ -4,10 +4,7 @@ if PlaceId == 7871169780 then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Ramiz0204/Ram-Hub/refs/heads/main/minesweeper"))()
 elseif PlaceId == 2248408710 then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Ramiz0204/Ram-Hub/refs/heads/main/Destruction%20simulator"))()
-elseif PlaceId == 537413528 then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com//ScriptSourceMobile/main/BuildABoatForTreasure"))()
-elseif PlaceId == 855499080 then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com//ScriptSourceMobile/main/Skywars"))()
+
 else
-    game.Players.LocalPlayer:kick("Game Not Support!")
+    game.Players.LocalPlayer:kick("Game Not Support!, Join Discord gg.MqpDMTe8ab ")
 end
